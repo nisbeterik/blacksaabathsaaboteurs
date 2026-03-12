@@ -1,6 +1,9 @@
 # llm.py — adapter
 # ui.py expects: from llm import chat(state, message, history) -> str
 # llm_integration.py provides: LLMAssistant().chat(user_message, state) -> str
+from dotenv import load_dotenv
+load_dotenv()
+
 from llm_integration import LLMAssistant
 
 _assistant = LLMAssistant()
