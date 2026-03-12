@@ -789,7 +789,7 @@ def build_ui():
             if not message or not message.strip():
                 return history, ""
             response = chat(s, message, history)
-            return history + [[message, response]], ""
+            return history + [{"role": "user", "content": message}, {"role": "assistant", "content": response}], ""
 
         def on_clear_chat():
             return [], ""
