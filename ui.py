@@ -25,7 +25,7 @@ try:
     from engine import (
         create_initial_state,
         trigger_fault, complete_maintenance, consume_resources,
-        advance_time, return_from_mission,
+        advance_time, return_from_mission, assign_aircraft,
     )
     # Extra event helpers — stub locally if Dev 1 hasn't added them yet
     try:
@@ -254,6 +254,24 @@ except ImportError:
         s.event_log.append(f"[H{s.current_hour:02d}] BREDDUPPGIFT: {new_id} {mtype} H{dep:02d}–H{ret:02d}")
         return s
 
+    def assign_aircraft(state, mission_id, aircraft_ids):
+        s = copy.deepcopy(state)
+        for m in s.ato.missions:
+            if m.id == mission_id:
+                for ac_id in aircraft_ids:
+                    for ac in s.aircraft:
+                        if ac.id == ac_id:
+                            if ac.status != "green":
+                                raise ValueError(f"{ac_id} is not available (status: {ac.status})")
+                            ac.status = "on_mission"
+                            ac.location = "on_mission"
+                m.assigned_aircraft = list(aircraft_ids)
+                break
+        s.event_log.append(
+            f"[H{s.current_hour:02d}] ASSIGN: {', '.join(aircraft_ids)} → {mission_id}"
+        )
+        return s
+
     def chat(state, message, history):
         return (
             f"[LLM not connected — Dev 3's llm.py not found]\n\n"
@@ -403,7 +421,58 @@ def render_status_bar(state) -> str:
     """
 
 
+def render_missions_html(state) -> str:
+    rows = []
+    for m in state.ato.missions:
+        n_assigned = len(m.assigned_aircraft)
+        n_req = m.required_aircraft
+        if n_assigned >= n_req:
+            status_color = "#3fb950"
+            status_label = "FULL"
+        elif n_assigned > 0:
+            status_color = "#d29922"
+            status_label = f"{n_assigned}/{n_req}"
+        else:
+            status_color = "#f85149"
+            status_label = "UNASSIGNED"
+        assigned_str = ", ".join(m.assigned_aircraft) if m.assigned_aircraft else "—"
+        desc = getattr(m, "description", "")
+        rows.append(f"""
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:5px 8px;color:#e6edf3;font-weight:bold">{m.id}</td>
+          <td style="padding:5px 8px">{m.type}</td>
+          <td style="padding:5px 8px;color:#8b949e">H{m.departure_hour:02d}:00 — H{m.return_hour:02d}:00</td>
+          <td style="padding:5px 8px;color:#a371f7">{m.required_config}</td>
+          <td style="padding:5px 8px;font-weight:bold;color:{status_color}">{status_label}</td>
+          <td style="padding:5px 8px;color:#c9d1d9">{assigned_str}</td>
+          <td style="padding:5px 8px;color:#484f58;font-size:10px">{desc}</td>
+        </tr>""")
+    return f"""
+    <div style="overflow-x:auto">
+    <table style="width:100%;font-family:'Courier New',monospace;font-size:11px;border-collapse:collapse;background:#0d1117">
+      <thead>
+        <tr style="color:#8b949e;border-bottom:2px solid #30363d;text-transform:uppercase;letter-spacing:1px;font-size:9px">
+          <th style="text-align:left;padding:5px 8px">ID</th>
+          <th style="text-align:left;padding:5px 8px">Type</th>
+          <th style="text-align:left;padding:5px 8px">Time Window</th>
+          <th style="text-align:left;padding:5px 8px">Config Required</th>
+          <th style="text-align:left;padding:5px 8px">Status</th>
+          <th style="text-align:left;padding:5px 8px">Assigned Aircraft</th>
+          <th style="text-align:left;padding:5px 8px">Description</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(rows)}</tbody>
+    </table>
+    </div>"""
+
+
 def render_fleet_html(state) -> str:
+    # Build lookup: aircraft_id -> mission
+    ac_mission_map = {}
+    for m in state.ato.missions:
+        for ac_id in m.assigned_aircraft:
+            ac_mission_map[ac_id] = m
+
     cards = []
     for ac in state.aircraft:
         label, color = _STATUS_META.get(ac.status, ("UNKNOWN", "#888"))
@@ -414,24 +483,32 @@ def render_fleet_html(state) -> str:
             if ac.fault else ""
         )
         eta_html = (
-            f'<div style="color:#d29922;font-size:10px">ETA: {ac.maintenance_eta}h</div>'
+            f'<div style="color:#d29922;font-size:10px">Repair ETA: {ac.maintenance_eta}h</div>'
             if ac.maintenance_eta else ""
         )
-        payload_str = ", ".join(ac.current_payload[:2]) if ac.current_payload else "—"
-        loc_str = ac.location.replace("_", " ")
+        mission = ac_mission_map.get(ac.id)
+        mission_html = (
+            f'<div style="color:#d29922;font-size:10px;margin-top:2px">&#9658; {mission.id}: {mission.type}</div>'
+            if mission else ""
+        )
+        payload_str = ", ".join(ac.current_payload[:3]) if ac.current_payload else "—"
+        loc_str = ac.location.replace("_", " ").title()
+        life_warn = ' style="color:#f85149"' if ac.remaining_life < 50 else (' style="color:#d29922"' if ac.remaining_life < 100 else '')
         cards.append(f"""
         <div class="ac-card s-{ac.status}">
-          <div style="font-size:15px;font-weight:bold;color:#e6edf3">{ac.id}</div>
-          <div style="color:#8b949e;font-size:10px">{ac.type}</div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:15px;font-weight:bold;color:#e6edf3">{ac.id}</span>
+            <span style="font-size:9px;color:#484f58">{ac.type}</span>
+          </div>
           <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;margin:2px 0 5px 0;color:{color}">{label}</div>
-          <div style="height:3px;border-radius:2px;background:#30363d;margin-bottom:5px">
+          <div style="height:3px;border-radius:2px;background:#30363d;margin-bottom:5px" title="Life remaining">
             <div style="height:100%;border-radius:2px;width:{life_pct:.0f}%;background:{bar_color}"></div>
           </div>
-          <div style="font-size:10px;color:#8b949e">{ac.remaining_life}h remaining</div>
-          <div style="font-size:10px;margin-top:3px">{ac.configuration}</div>
-          <div style="font-size:10px;color:#8b949e">{payload_str}</div>
+          <div{life_warn} style="font-size:10px">{ac.remaining_life}h until heavy service</div>
+          <div style="font-size:10px;margin-top:3px;color:#c9d1d9">{ac.configuration}</div>
+          <div style="font-size:10px;color:#8b949e">Load: {payload_str}</div>
           <div style="font-size:10px;color:#484f58">{loc_str}</div>
-          {fault_html}{eta_html}
+          {mission_html}{fault_html}{eta_html}
         </div>""")
     return f'<div class="aircraft-grid">{"".join(cards)}</div>'
 
@@ -643,10 +720,20 @@ def render_event_log(state) -> str:
 def build_ui():
     def refresh_all(state):
         ac_ids = [ac.id for ac in state.aircraft]
+        mission_choices = [
+            f"{m.id}: {m.type} — H{m.departure_hour:02d}→H{m.return_hour:02d} "
+            f"({len(m.assigned_aircraft)}/{m.required_aircraft} assigned, needs {m.required_config})"
+            for m in state.ato.missions
+        ]
+        avail_ac_choices = [
+            f"{ac.id} | {ac.type} | {ac.configuration} | {ac.remaining_life}h remaining"
+            for ac in state.aircraft if ac.status == "green"
+        ]
         return (
             render_status_bar(state),
             render_fleet_html(state),
             render_wear_chart(state),
+            render_missions_html(state),
             render_timeline_chart(state),
             render_maint_chart(state),
             render_weapons_chart(state),
@@ -655,6 +742,8 @@ def build_ui():
             render_eu_chart(state),
             render_event_log(state),
             gr.update(choices=ac_ids, value=None),
+            gr.update(choices=mission_choices, value=None),
+            gr.update(choices=avail_ac_choices, value=None),
             state,
         )
 
@@ -672,16 +761,22 @@ def build_ui():
 
                     # ── Fleet Status tab ──────────────────────────────────
                     with gr.Tab("Fleet Status"):
+                        gr.Markdown("**Aircraft cards** — colour-coded by status: green = ready, amber = on mission, red = maintenance, grey = cannibalized. Bar shows hours until next heavy service.")
                         fleet_html = gr.HTML()
+                        gr.Markdown("**Wear chart** — sorted by remaining flight hours. Red line = critical (<50h), amber = caution (<100h).")
                         wear_plot  = gr.Plot(show_label=False)
 
                     # ── Timeline tab ──────────────────────────────────────
-                    with gr.Tab("Timeline"):
+                    with gr.Tab("Timeline / ATO"):
+                        gr.Markdown("**ATO Mission List** — shows all planned sorties, required config, and current assignments.")
+                        missions_html = gr.HTML()
+                        gr.Markdown("**Timeline** — horizontal bars show departure and return windows. White dashed line = current time.")
                         timeline_plot = gr.Plot(show_label=False)
+                        gr.Markdown("**Maintenance Slots** — capacity vs current occupancy per bay type.")
                         maint_plot    = gr.Plot(show_label=False)
 
                     # ── Resources tab ─────────────────────────────────────
-                    with gr.Tab("Resources"):
+                    with gr.Tab("Resources & Logistics"):
                         with gr.Row():
                             weapons_plot   = gr.Plot(show_label=False)
                             personnel_plot = gr.Plot(show_label=False)
@@ -705,13 +800,27 @@ def build_ui():
                     chat_btn  = gr.Button("SEND",  size="sm", variant="primary")
                     clear_btn = gr.Button("CLEAR", size="sm")
 
+        # ── Aircraft Assignment ────────────────────────────────────────────────
+        gr.Markdown("---\n### Aircraft Assignment\nSelect a mission and one or more available (green) aircraft, then click **Assign** to commit.")
+        with gr.Row():
+            mission_assign_dd = gr.Dropdown(
+                choices=[], label="Mission", interactive=True, scale=3,
+                info="Pick the mission to assign aircraft to",
+            )
+            aircraft_assign_dd = gr.Dropdown(
+                choices=[], label="Available Aircraft (select one or more)", multiselect=True,
+                interactive=True, scale=4,
+                info="Only green / ready aircraft are shown",
+            )
+            assign_btn = gr.Button("ASSIGN", variant="primary", scale=1)
+
         # ── Event injection ───────────────────────────────────────────────────
-        gr.Markdown("---\n### Event Injection")
+        gr.Markdown("---\n### Event Injection\nSelect a target aircraft from the dropdown, then trigger an event. *Bredduppgift* and *Resupply Delay* act on the whole base.")
         with gr.Row():
             ac_selector  = gr.Dropdown(choices=[], label="Target Aircraft", interactive=True, scale=1)
-            bit_btn      = gr.Button("BIT Check",        elem_classes=["evt-btn"], scale=1)
+            bit_btn      = gr.Button("BIT Fault Check",   elem_classes=["evt-btn"], scale=1)
             returns_btn  = gr.Button("Aircraft Returns",  elem_classes=["evt-btn"], scale=1)
-            breddup_btn  = gr.Button("Bredduppgift",      elem_classes=["evt-btn"], scale=1)
+            breddup_btn  = gr.Button("Bredduppgift (New Mission)", elem_classes=["evt-btn"], scale=2)
             resupply_btn = gr.Button("Resupply Delay",    elem_classes=["evt-btn"], scale=1)
             advance_btn  = gr.Button("Advance +2h",       elem_classes=["evt-btn"], scale=1)
 
@@ -722,14 +831,17 @@ def build_ui():
             gr.Markdown("*Pre-staged events from the demo script — click to trigger instantly.*")
             with gr.Row():
                 sc1_btn = gr.Button("Scenario 1 — New ATO (4× DCA + 2× RECCE)", variant="secondary")
-                sc2_btn = gr.Button("Scenario 2 — GE05 BIT Fail + GE09 Returns Damaged", variant="stop")
+                sc2_btn = gr.Button("Scenario 2 — GE05 BIT Fail + On-Mission Aircraft Returns Damaged", variant="stop")
                 sc3_btn = gr.Button("Scenario 3 — Advance +12h + Resupply Disruption", variant="secondary")
 
         # ── ALL_OUTPUTS list (defined after all components) ───────────────────
         ALL_OUTPUTS = [
-            status_html, fleet_html, wear_plot, timeline_plot, maint_plot,
+            status_html, fleet_html, wear_plot,
+            missions_html, timeline_plot, maint_plot,
             weapons_plot, personnel_plot, fuel_plot, eu_plot,
-            event_log_html, ac_selector, state,
+            event_log_html, ac_selector,
+            mission_assign_dd, aircraft_assign_dd,
+            state,
         ]
 
         # ── Callbacks ─────────────────────────────────────────────────────────
@@ -768,12 +880,26 @@ def build_ui():
             return refresh_all(ns)
 
         def on_scenario2(s):
-            ns = trigger_fault(s, "GE05")
-            ns = return_from_mission(ns, "GE09")
-            ns = trigger_fault(ns, "GE09")
-            ns.event_log.append(
-                f"[H{ns.current_hour:02d}] DEMO SC2: Fault cascade — GE05 BIT fail + GE09 returned damaged"
+            ns = copy.deepcopy(s)
+            ns = trigger_fault(ns, "GE05")
+            # Find whichever aircraft is currently on_mission (other than GE05)
+            returning_ac = next(
+                (ac for ac in ns.aircraft if ac.status == "on_mission" and ac.id != "GE05"),
+                None,
             )
+            if returning_ac:
+                ns = return_from_mission(ns, returning_ac.id)
+                # Guarantee the returning aircraft is damaged
+                ac_after = next((a for a in ns.aircraft if a.id == returning_ac.id), None)
+                if ac_after and ac_after.status == "green":
+                    ns = trigger_fault(ns, returning_ac.id)
+                ns.event_log.append(
+                    f"[H{ns.current_hour:02d}] DEMO SC2: GE05 BIT fail + {returning_ac.id} returned damaged"
+                )
+            else:
+                ns.event_log.append(
+                    f"[H{ns.current_hour:02d}] DEMO SC2: GE05 BIT fail (no aircraft currently on mission)"
+                )
             return refresh_all(ns)
 
         def on_scenario3(s):
@@ -783,6 +909,19 @@ def build_ui():
             ns.event_log.append(
                 f"[H{ns.current_hour:02d}] DEMO SC3: +12h advance + double resupply disruption"
             )
+            return refresh_all(ns)
+
+        def on_assign_aircraft(mission_choice, aircraft_choices, s):
+            if not mission_choice or not aircraft_choices:
+                return refresh_all(s)
+            mission_id = mission_choice.split(":")[0].strip()
+            ac_ids = [ac.split("|")[0].strip() for ac in aircraft_choices]
+            try:
+                ns = copy.deepcopy(s)
+                ns = assign_aircraft(ns, mission_id, ac_ids)
+            except Exception as e:
+                ns = copy.deepcopy(s)
+                ns.event_log.append(f"[H{ns.current_hour:02d}] ERROR: Assignment failed — {e}")
             return refresh_all(ns)
 
         def on_chat(message, history, s):
@@ -795,6 +934,8 @@ def build_ui():
             return [], ""
 
         # ── Wire buttons ──────────────────────────────────────────────────────
+
+        assign_btn.click(fn=on_assign_aircraft, inputs=[mission_assign_dd, aircraft_assign_dd, state], outputs=ALL_OUTPUTS)
 
         bit_btn.click(fn=on_bit_check,   inputs=[ac_selector, state], outputs=ALL_OUTPUTS)
         returns_btn.click(fn=on_returns, inputs=[ac_selector, state], outputs=ALL_OUTPUTS)
