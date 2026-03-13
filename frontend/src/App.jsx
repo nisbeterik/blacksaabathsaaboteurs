@@ -40,7 +40,12 @@ function isCritical(prev, next) {
     return p && p.remaining_life > 20 && a.remaining_life <= 20
   })
   const dayRollover = next.current_day !== prev.current_day
-  return newFault || lifeDrop || dayRollover
+  const missedDeparture = !dayRollover && (next.ato?.missions ?? []).some(m =>
+    m.assigned_aircraft?.length === 0 &&
+    prev.current_hour < m.departure_hour &&
+    next.current_hour >= m.departure_hour
+  )
+  return newFault || lifeDrop || dayRollover || missedDeparture
 }
 
 async function apiFetch(path, options = {}) {
