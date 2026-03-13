@@ -483,6 +483,9 @@ def return_from_mission(
     Optionally rolls post-mission check.
     """
     ac = _find_aircraft(state, aircraft_id)
+    if ac.status != "on_mission":
+        raise ValueError(f"Cannot return {aircraft_id}: status is '{ac.status}' (must be on_mission)")
+
     ac.status = "green"
     ac.location = "flight_line"
     ac.remaining_life = max(0, ac.remaining_life - flight_hours)
