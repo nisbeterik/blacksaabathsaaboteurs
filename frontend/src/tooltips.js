@@ -21,6 +21,7 @@ export const GLOSSARY = {
   'READY':       'Aircraft has passed pre-flight checks and is ready to be assigned',
   'MAINT':       'In maintenance — unavailable until fault is resolved',
   'AIRBORNE':    'Currently on an active mission',
+  'RETURNING':   'In transit back to base — advance time for the aircraft to land',
   'GREY':        'Cannibalized — parts removed to support another aircraft',
   'ATO':         'Air Tasking Order — the daily schedule of planned missions',
   'ETA':         'Estimated Time of Arrival — hours until maintenance completes',
