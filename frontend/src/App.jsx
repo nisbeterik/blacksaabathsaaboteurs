@@ -8,6 +8,12 @@ import ControlBar from './components/ControlBar'
 
 const TABS = ['Fleet', 'Missions', 'Resources']
 
+const PHASE_DESC = {
+  Fred: 'Peacetime — low readiness, normal ops',
+  Kris: 'Crisis — elevated readiness, restricted comms',
+  Krig: 'War — full combat ops, minimal margin for error',
+}
+
 async function apiFetch(path, options = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -32,7 +38,7 @@ export default function App() {
 
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 3500)
+    setTimeout(() => setToast(null), 4000)
   }
 
   const fetchState = useCallback(async () => {
@@ -47,7 +53,20 @@ export default function App() {
   useEffect(() => {
     fetchState()
     pollRef.current = setInterval(fetchState, 3000)
-    return () => clearInterval(pollRef.current)
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        clearInterval(pollRef.current)
+      } else {
+        fetchState()
+        pollRef.current = setInterval(fetchState, 3000)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(pollRef.current)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [fetchState])
 
   const runAction = async (path, body = null) => {
@@ -58,6 +77,10 @@ export default function App() {
         body: body ? JSON.stringify(body) : undefined,
       })
       setState(data)
+      // Surface what the random event actually was
+      if (path === '/api/action/random-event' && data.event_log?.length) {
+        showToast(data.event_log[data.event_log.length - 1], 'info')
+      }
     } catch (e) {
       showToast(e.message, 'error')
     } finally {
@@ -69,16 +92,16 @@ export default function App() {
     const msg = chatInput.trim()
     if (!msg || chatLoading) return
     setChatInput('')
-    setMessages(prev => [...prev, { role: 'user', content: msg }])
+    setMessages(prev => [...prev, { role: 'user', content: msg, time: new Date() }])
     setChatLoading(true)
     try {
       const data = await apiFetch('/api/chat', {
         method: 'POST',
         body: JSON.stringify({ message: msg }),
       })
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply, time: new Date() }])
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e.message}` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e.message}`, time: new Date() }])
     } finally {
       setChatLoading(false)
     }
@@ -89,11 +112,10 @@ export default function App() {
     setMessages([])
   }
 
-  // Summary counts for header
-  const ready    = state?.aircraft?.filter(a => a.status === 'green').length ?? 0
+  const ready     = state?.aircraft?.filter(a => a.status === 'green').length ?? 0
   const onMission = state?.aircraft?.filter(a => a.status === 'on_mission').length ?? 0
-  const inMaint  = state?.aircraft?.filter(a => a.status === 'red').length ?? 0
-  const grey     = state?.aircraft?.filter(a => a.status === 'grey').length ?? 0
+  const inMaint   = state?.aircraft?.filter(a => a.status === 'red').length ?? 0
+  const grey      = state?.aircraft?.filter(a => a.status === 'grey').length ?? 0
 
   return (
     <div className="flex flex-col h-screen bg-base text-text-hi overflow-hidden">
@@ -109,10 +131,15 @@ export default function App() {
           {state && (
             <>
               <span className="text-text-hi font-semibold">
-                Day {state.current_day} &middot; {String(state.current_hour).padStart(2,'0')}:00
+                Day {state.current_day} &middot; {String(state.current_hour).padStart(2, '0')}:00
               </span>
               <span className="text-text-dim">|</span>
-              <span className="uppercase tracking-widest text-col-amber font-bold">{state.phase}</span>
+              <span
+                className="uppercase tracking-widest text-col-amber font-bold cursor-help border-b border-dashed border-col-amber/40"
+                title={PHASE_DESC[state.phase] ?? ''}
+              >
+                {state.phase}
+              </span>
               <span className="text-text-dim">|</span>
               <span className="text-col-green">{ready} Ready</span>
               <span className="text-col-blue">{onMission} Flying</span>
@@ -156,13 +183,16 @@ export default function App() {
             )}
             {state && activeTab === 'Fleet'     && <FleetPanel state={state} />}
             {state && activeTab === 'Missions'  && (
-              <MissionsPanel state={state} onAssign={(mid, aids) => runAction('/api/action/assign-aircraft', { mission_id: mid, aircraft_ids: aids })} />
+              <MissionsPanel
+                state={state}
+                onAssign={(mid, aids) => runAction('/api/action/assign-aircraft', { mission_id: mid, aircraft_ids: aids })}
+              />
             )}
             {state && activeTab === 'Resources' && <ResourcesPanel state={state} />}
           </div>
 
           {/* Event log */}
-          <div className="flex-shrink-0 border-t border-border" style={{ height: '140px' }}>
+          <div className="flex-shrink-0 border-t border-border" style={{ height: '180px' }}>
             <EventLog events={state?.event_log ?? []} />
           </div>
         </div>
@@ -187,8 +217,8 @@ export default function App() {
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded text-sm font-semibold shadow-lg
-          ${toast.type === 'error' ? 'bg-col-red text-white' : 'bg-col-blue text-white'}`}>
+        <div className={`fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded text-xs font-semibold shadow-lg max-w-sm text-center
+          ${toast.type === 'error' ? 'bg-col-red text-white' : 'bg-raised border border-border text-text-hi'}`}>
           {toast.msg}
         </div>
       )}
