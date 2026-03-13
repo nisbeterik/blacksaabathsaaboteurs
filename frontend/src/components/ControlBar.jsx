@@ -1,3 +1,7 @@
+import { useContext } from 'react'
+import { TooltipCtx } from '../App'
+import Tooltip from './Tooltip'
+
 const TIME_ACTIONS = [
   { label: '+1h',  hours: 1  },
   { label: '+6h',  hours: 6  },
@@ -11,6 +15,7 @@ const SCENARIO_COLORS = [
 ]
 
 export default function ControlBar({ onAction, loading, scenarios = [], onRunScenario }) {
+  const tooltipsEnabled = useContext(TooltipCtx)
   const handleReset = () => {
     if (window.confirm('Reset all state to initial? This cannot be undone.')) {
       onAction('/api/action/reset')
@@ -23,6 +28,14 @@ export default function ControlBar({ onAction, loading, scenarios = [], onRunSce
       {/* Scenario buttons */}
       {scenarios.length > 0 && (
         <>
+          <Tooltip
+            text="Pre-scripted demo steps — each loads a situation and pre-fills the chat with a question. ⚡ steps also trigger a state event."
+            enabled={tooltipsEnabled}
+          >
+            <span className="text-[10px] font-bold tracking-wider uppercase text-text-dim cursor-default select-none">
+              Scenarios
+            </span>
+          </Tooltip>
           <div className="flex gap-1.5">
             {scenarios.map((s, i) => (
               <button
@@ -30,14 +43,12 @@ export default function ControlBar({ onAction, loading, scenarios = [], onRunSce
                 onClick={() => onRunScenario(s.label)}
                 disabled={loading}
                 title={s.label}
-                className={`flex flex-col items-center px-3 py-1 border rounded text-xs font-semibold
+                className={`px-3 py-1 border rounded text-xs font-semibold whitespace-nowrap
                   transition-colors disabled:opacity-40 disabled:cursor-not-allowed
                   ${SCENARIO_COLORS[i % SCENARIO_COLORS.length]}`}
               >
-                <span>Sc{i + 1}</span>
-                <span className="text-[10px] opacity-70 font-normal max-w-[72px] truncate">
-                  {s.label.replace(/^\d+\.\s*/, '')}
-                </span>
+                {s.label.replace(/^\d+\.\s*/, '').split(' — ')[0]}
+                {s.has_event && <span className="ml-1 text-col-amber">⚡</span>}
               </button>
             ))}
           </div>
