@@ -396,6 +396,8 @@ def trigger_fault(
 def complete_maintenance(state: BaseState, aircraft_id: str) -> BaseState:
     """Mark maintenance complete; aircraft returns to flight line as green."""
     ac = _find_aircraft(state, aircraft_id)
+    if ac.status != "red":
+        raise ValueError(f"Cannot complete maintenance on {aircraft_id}: status is '{ac.status}' (must be red)")
     slot = _find_slot_for_aircraft(state, aircraft_id)
     if slot:
         slot.current_occupants.remove(aircraft_id)
