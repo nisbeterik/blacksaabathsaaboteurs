@@ -106,6 +106,43 @@ export default function MissionsPanel({ state, onAssign }) {
   return (
     <div className="space-y-4">
 
+      {/* ATO Coverage summary */}
+      {(() => {
+        const total    = missions.length
+        const covered  = missions.filter(m => (m.assigned_aircraft ?? []).length >= m.required_aircraft).length
+        const partial  = missions.filter(m => (m.assigned_aircraft ?? []).length > 0 && (m.assigned_aircraft ?? []).length < m.required_aircraft).length
+        const missing  = missions.filter(m => (m.assigned_aircraft ?? []).length === 0).length
+        const allGood  = covered === total
+        return (
+          <div className={`border rounded p-3 flex items-center gap-4 ${allGood ? 'bg-col-green/5 border-col-green/30' : 'bg-col-amber/5 border-col-amber/30'}`}>
+            <div className="flex-1">
+              <div className={`text-xs font-bold uppercase tracking-wider mb-1 ${allGood ? 'text-col-green' : 'text-col-amber'}`}>
+                ATO Coverage
+              </div>
+              <div className="flex gap-3 text-xs">
+                <span className="text-col-green">{covered} fully assigned</span>
+                {partial > 0 && <span className="text-col-amber">{partial} partial</span>}
+                {missing > 0 && <span className="text-col-red">{missing} unassigned</span>}
+              </div>
+            </div>
+            <div className="flex gap-1">
+              {missions.map(m => {
+                const assigned = m.assigned_aircraft ?? []
+                const full = assigned.length >= m.required_aircraft
+                const none = assigned.length === 0
+                const color = full ? 'bg-col-green' : none ? 'bg-col-red' : 'bg-col-amber'
+                return (
+                  <div key={m.id} className="flex flex-col items-center gap-0.5" title={`${m.id} ${m.type}: ${assigned.length}/${m.required_aircraft}`}>
+                    <div className={`w-2 h-2 rounded-full ${color}`} />
+                    <span className="text-xs text-text-dim" style={{ fontSize: '9px' }}>{m.id}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Gantt timeline */}
       <div className="bg-surface border border-border rounded p-3">
         <div className="text-xs text-text-dim uppercase tracking-wider mb-3">
