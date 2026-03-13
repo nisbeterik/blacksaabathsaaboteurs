@@ -14,13 +14,20 @@ const SCENARIO_COLORS = [
   'border-col-amber text-col-amber hover:bg-col-amber/10',
 ]
 
-export default function ControlBar({ onAction, loading, scenarios = [], onRunScenario }) {
+export default function ControlBar({
+  onAction, loading, scenarios = [], onRunScenario,
+  autoplay, onToggleAutoplay,
+  autoplaySpeedIdx, onCycleSpeed, autoplaySpeeds = [],
+  autoplayRandomEvents, onToggleRandomEvents,
+}) {
   const tooltipsEnabled = useContext(TooltipCtx)
   const handleReset = () => {
     if (window.confirm('Reset all state to initial? This cannot be undone.')) {
       onAction('/api/action/reset')
     }
   }
+
+  const speedEntry = autoplaySpeeds[autoplaySpeedIdx] ?? { label: '×1 Slow', tip: '' }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -56,15 +63,49 @@ export default function ControlBar({ onAction, loading, scenarios = [], onRunSce
         </>
       )}
 
-      {/* Time controls */}
+      {/* Autoplay controls */}
+      <button
+        onClick={onToggleAutoplay}
+        disabled={loading}
+        className={`px-2.5 py-1 rounded text-xs font-semibold border transition-colors disabled:opacity-40
+          ${autoplay
+            ? 'border-col-amber/60 text-col-amber hover:bg-col-amber/10'
+            : 'border-col-green/60 text-col-green hover:bg-col-green/10'}`}
+      >
+        {autoplay ? '⏸ Pause' : '▶ Play'}
+      </button>
+
+      <Tooltip text={speedEntry.tip} enabled={tooltipsEnabled}>
+        <button
+          onClick={onCycleSpeed}
+          className="px-2.5 py-1 rounded text-xs border border-border text-text-lo hover:text-text-hi transition-colors"
+        >
+          {speedEntry.label}
+        </button>
+      </Tooltip>
+
+      <button
+        onClick={onToggleRandomEvents}
+        title="Occasionally fires random events (BIT faults, weather, new missions) during autoplay — ~4% chance per game-hour"
+        className={`px-2.5 py-1 rounded text-xs border transition-colors
+          ${autoplayRandomEvents
+            ? 'border-col-red/50 text-col-red hover:bg-col-red/10'
+            : 'border-border text-text-dim hover:text-text-lo'}`}
+      >
+        {autoplayRandomEvents ? '🎲 Events ON' : '🎲 Events OFF'}
+      </button>
+
+      <div className="w-px h-8 bg-border" />
+
+      {/* Time controls — disabled while autoplay is running */}
       <div className="flex gap-1">
         {TIME_ACTIONS.map(t => (
           <button
             key={t.label}
             onClick={() => onAction('/api/action/advance-time', { hours: t.hours })}
-            disabled={loading}
+            disabled={loading || autoplay}
             className="px-2.5 py-1 border border-border text-text-lo hover:text-text-hi hover:border-text-dim
-              rounded text-xs font-semibold transition-colors disabled:opacity-40"
+              rounded text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {t.label}
           </button>
