@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 const QUICK_PROMPTS = [
   'Which aircraft for the next DCA sortie?',
   "What's our readiness for the next 48h?",
-  'GE05 failed BIT — radar fault. What\'s the impact?',
-  'Should I cannibalize GE03 for the radar?',
+  "GE05 failed BIT — complex LRU fault. What's the impact?",
+  'Should I use a Radar UE on GE05 or hold it in reserve?',
 ]
 
 function fmtTime(date) {
@@ -32,9 +32,13 @@ function Message({ msg }) {
   )
 }
 
-export default function ChatPanel({ messages, input, loading, onInputChange, onSend, onClear }) {
+export default function ChatPanel({
+  messages, input, loading, onInputChange, onSend, onClear,
+  scenarios = [], onRunScenario, actionLoading = false,
+}) {
   const bottomRef = useRef(null)
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [showScript, setShowScript] = useState(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -52,6 +56,11 @@ export default function ChatPanel({ messages, input, loading, onInputChange, onS
     setShowSuggestions(false)
   }
 
+  const loadScenario = (label) => {
+    setShowScript(false)
+    onRunScenario(label)
+  }
+
   return (
     <div className="flex flex-col h-full relative">
 
@@ -62,8 +71,20 @@ export default function ChatPanel({ messages, input, loading, onInputChange, onS
           <span className="text-xs font-bold tracking-wider uppercase text-text-hi">AI Assistant</span>
         </div>
         <div className="flex items-center gap-1">
+          {scenarios.length > 0 && (
+            <button
+              onClick={() => { setShowScript(s => !s); setShowSuggestions(false) }}
+              className={`text-xs px-2 py-0.5 rounded border transition-colors
+                ${showScript
+                  ? 'border-col-amber/50 text-col-amber bg-col-amber/10'
+                  : 'border-transparent text-text-dim hover:text-text-lo hover:bg-raised'
+                }`}
+            >
+              Script
+            </button>
+          )}
           <button
-            onClick={() => setShowSuggestions(s => !s)}
+            onClick={() => { setShowSuggestions(s => !s); setShowScript(false) }}
             className={`text-xs px-2 py-0.5 rounded border transition-colors
               ${showSuggestions
                 ? 'border-col-blue/50 text-col-blue bg-col-blue/10'
@@ -80,6 +101,29 @@ export default function ChatPanel({ messages, input, loading, onInputChange, onS
           </button>
         </div>
       </div>
+
+      {/* Demo script dropdown */}
+      {showScript && (
+        <div className="absolute top-10 left-0 right-0 z-10 bg-raised border-b border-border p-2 space-y-1 shadow-lg max-h-72 overflow-y-auto">
+          <div className="text-xs text-text-dim uppercase tracking-wider px-1 pb-1">
+            Demo Script — click a step to load
+          </div>
+          {scenarios.map((s) => (
+            <button
+              key={s.label}
+              onClick={() => loadScenario(s.label)}
+              disabled={actionLoading}
+              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-surface border border-transparent
+                hover:border-border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <span className="text-text-hi">{s.label}</span>
+              {s.has_event && (
+                <span className="ml-1.5 text-col-amber" title="Triggers a state mutation">⚡</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Quick suggestions dropdown */}
       {showSuggestions && (

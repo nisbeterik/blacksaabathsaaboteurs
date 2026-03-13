@@ -29,6 +29,7 @@ from engine import (
     generate_random_event,
 )
 from llm_integration import LLMAssistant
+from demo_scenarios import DEMO_SCRIPT
 
 app = FastAPI(title="SAAB Base Commander API")
 
@@ -64,6 +65,9 @@ class AssignAircraftRequest(BaseModel):
 
 class AircraftIdRequest(BaseModel):
     aircraft_id: str
+
+class DemoRunRequest(BaseModel):
+    label: str
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +106,9 @@ def api_reset():
     reset_state()
     if assistant:
         assistant.clear_history()
-    return serialize_state_json(get_state())
+    result = serialize_state_json(get_state())
+    result["chat_cleared"] = True
+    return result
 
 @app.post("/api/action/advance-time")
 def api_advance_time(body: AdvanceTimeRequest):
@@ -215,6 +221,49 @@ def api_scenario3():
             except Exception:
                 pass
     return serialize_state_json(s)
+
+
+# ---------------------------------------------------------------------------
+# Demo script endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/demo/scenarios")
+def api_demo_scenarios():
+    """Return the full demo script so the frontend can render a scenario picker."""
+    return [
+        {"label": s.label, "question": s.question, "has_event": s.event_trigger is not None}
+        for s in DEMO_SCRIPT
+    ]
+
+
+@app.post("/api/demo/run")
+def api_demo_run(body: DemoRunRequest):
+    """
+    Execute a demo scenario step:
+      1. Apply the event_trigger state mutation (if any).
+      2. Return the updated state + the question to pre-fill in the chat input.
+    """
+    step = next((s for s in DEMO_SCRIPT if s.label == body.label), None)
+    if not step:
+        raise HTTPException(status_code=404, detail=f"Scenario not found: {body.label}")
+
+    s = get_state()
+
+    if step.event_trigger == "bit_fail_ge05":
+        ge05 = next((a for a in s.aircraft if a.id == "GE05"), None)
+        if ge05 and ge05.status == "green":
+            trigger_fault(s, "GE05", fault_roll=3)  # Complex LRU, 6h repair
+
+    elif step.event_trigger == "return_damaged_ge07":
+        ge07 = next((a for a in s.aircraft if a.id == "GE07"), None)
+        if ge07 and ge07.status != "red":
+            if ge07.status != "on_mission":
+                ge07.status = "on_mission"
+                ge07.location = "on_mission"
+            return_from_mission(s, "GE07", do_post_mission_roll=False)
+            trigger_fault(s, "GE07", fault_roll=4)  # Direct repair (Kompositrep), 16h
+
+    return {"state": serialize_state_json(s), "question": step.question}
 
 
 # ---------------------------------------------------------------------------

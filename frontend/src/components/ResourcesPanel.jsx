@@ -25,11 +25,10 @@ function StatBar({ label, value, max, unit = '' }) {
   )
 }
 
-function SectionCard({ title, icon, children }) {
+function SectionCard({ title, children }) {
   return (
     <div className="bg-surface border border-border rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-raised">
-        <span className="text-base">{icon}</span>
         <span className="text-xs font-semibold uppercase tracking-widest text-text-lo">{title}</span>
       </div>
       <div className="p-4 space-y-3">
@@ -62,7 +61,6 @@ export default function ResourcesPanel({ state }) {
       {/* Fuel — big hero card */}
       <div className="bg-surface border border-border rounded-lg overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-raised">
-          <span className="text-base">⛽</span>
           <span className="text-xs font-semibold uppercase tracking-widest text-text-lo">Fuel</span>
         </div>
         <div className="p-4">
@@ -98,7 +96,7 @@ export default function ResourcesPanel({ state }) {
       </div>
 
       {/* Weapons */}
-      <SectionCard title="Weapons" icon="🚀">
+      <SectionCard title="Weapons">
         {Object.entries(r.weapons ?? {}).map(([k, v]) => (
           <StatBar key={k} label={k} value={v} max={WEAPON_MAX[k] ?? Math.max(v * 2, 4)} unit=" rds" />
         ))}
@@ -108,7 +106,7 @@ export default function ResourcesPanel({ state }) {
       </SectionCard>
 
       {/* Exchange Units */}
-      <SectionCard title="Exchange Units (UE)" icon="🔧">
+      <SectionCard title="Exchange Units (UE)">
         <div className="grid grid-cols-2 gap-x-6 gap-y-3">
           {Object.entries(r.exchange_units ?? {}).map(([k, v]) => {
             const max = EU_MAX[k] ?? Math.max(v + 2, 4)
@@ -130,7 +128,7 @@ export default function ResourcesPanel({ state }) {
       </SectionCard>
 
       {/* Personnel */}
-      <SectionCard title="Personnel" icon="👥">
+      <SectionCard title="Personnel">
         <div className="grid grid-cols-3 gap-3">
           {Object.entries(r.personnel ?? {}).map(([k, v]) => {
             const max = PERS_MAX[k] ?? Math.max(v + 2, 6)
@@ -150,7 +148,7 @@ export default function ResourcesPanel({ state }) {
       </SectionCard>
 
       {/* Spare Parts */}
-      <SectionCard title="Spare Parts" icon="📦">
+      <SectionCard title="Spare Parts">
         <StatBar label="Generic spares" value={r.spare_parts} max={50} unit=" units" />
         <div className="text-xs text-text-dim">
           Pool covers minor LRU swaps · critical parts tracked as Exchange Units above

@@ -6,6 +6,16 @@ Each scenario step has:
   - label:    short name shown in the UI dropdown
   - question: the natural-language question to send to the LLM
   - notes:    presenter talking points (not shown to LLM)
+
+Initial engine state (Day 2, 08:00, Phase: Kris):
+  GE01 green DCA/CAP 180h | GE02 green RECCE   145h | GE03 green DCA/CAP 110h
+  GE04 green AI/ST   85h  | GE05 green DCA/CAP  62h | GE06 RED   DCA/CAP  48h (service bay, ETA 4h)
+  GE07 green RECCE   35h  | GE08 green DCA/CAP  20h | GF01 green DCA/CAP 155h
+  GF02 on_mission DCA/CAP 95h
+  Weapons: Robot-1×14, Bomb-2×8, Robot-15×4
+  Exchange units: Radar×3, SignalProcessor×2, EjectionSeat×1, HydraulicPump×2
+  Personnel: pilots×8
+  ATO: M01 DCA 10:00, M02 DCA 14:00, M03 DCA 20:00, M04 RECCE 09:00, M05 AI/ST 12:00, M06 QRA 00:00
 """
 
 from dataclasses import dataclass
@@ -31,44 +41,49 @@ DEMO_SCRIPT: list[ScenarioStep] = [
     ScenarioStep(
         label="1. New ATO — allocate aircraft",
         question=(
-            "New ATO just came in. We need 4 DCA/CAP sorties and 2 RECCE sorties "
-            "starting from 14:00 today. Which aircraft should we assign, and in what order? "
-            "Keep wear levels balanced."
+            "New ATO just came in. We need to cover M01 and M02 (DCA/CAP), "
+            "M04 (RECCE), and M05 (AI/ST) today. Which aircraft should we assign "
+            "to each mission, and in what order? Keep wear levels balanced."
         ),
         notes=(
-            "AI should recommend GE01/GE02/GE04/GE08 for DCA, GE06 for RECCE. "
-            "Should flag GE05 as low-life (34h) — avoid for routine missions. "
-            "GE03 is in maintenance so unavailable."
+            "DCA/CAP (green): GE01 (180h), GF01 (155h), GE03 (110h), GE05 (62h), GE08 (20h — critical). "
+            "RECCE (green): GE02 (145h), GE07 (35h — low). "
+            "AI/ST (green): GE04 (85h). "
+            "GE06 is in service bay (4h ETA) — unavailable. "
+            "AI should recommend GE01+GF01 for DCA (most life), GE02 for RECCE, GE04 for AI/ST. "
+            "Should flag GE08 as critically low at 20h — avoid for routine missions. "
+            "GE05 borderline at 62h."
         ),
     ),
 
     ScenarioStep(
         label="2. Check QRA readiness",
         question=(
-            "Is our QRA aircraft (M05) properly resourced for a 24-hour standby? "
+            "Is our QRA mission (M06) properly resourced for a 24-hour standby? "
             "Do we have enough Robot-1 missiles and a pilot available?"
         ),
         notes=(
             "QRA = Quick Reaction Alert, always-on intercept aircraft. "
-            "Should check weapons inventory (Robot1: 14 available), pilot count (9). "
-            "Should come back green."
+            "Should check weapons inventory (Robot-1: 14 available) and pilot count (8 pilots). "
+            "Should come back green — resources are sufficient."
         ),
     ),
 
     # --- Scenario 2: Fault cascade (2:30–4:00) ---
     ScenarioStep(
-        label="3. GE05 fails BIT — radar fault",
+        label="3. GE05 fails BIT — complex LRU fault",
         event_trigger="bit_fail_ge05",
         question=(
-            "GE05 just failed pre-flight BIT — radar fault detected, estimated 6-hour repair. "
-            "GE05 was assigned to the AI/ST mission M04 at 16:00. What's the impact, "
+            "GE05 just failed pre-flight BIT — complex LRU fault detected, estimated 6-hour repair. "
+            "GE05 was planned for DCA mission M01 at 10:00. What's the impact, "
             "and what are our options?"
         ),
         notes=(
-            "GE05 has only 34h remaining life — it was already a concern. "
-            "AI should suggest GE08 as replacement (also AI/ST config, 158h life). "
-            "Should flag we now have 2 aircraft in maintenance (GE03 + GE05). "
-            "Should ask: do we have a Radar exchange unit? (Yes, 1 left after GE03 took one.)"
+            "GE05 has 62h remaining life — borderline. Now in service bay for 6h. "
+            "AI should suggest GE03 (110h) or GF01 (155h) as replacement for M01 (both DCA/CAP). "
+            "Now 2 aircraft unavailable: GE06 (service bay, 4h ETA) + GE05 (just faulted). "
+            "Radar exchange units: 3 available — sufficient for the repair. "
+            "AI should check if service bay has capacity (GE06 already occupies one slot, capacity is 2)."
         ),
     ),
 
@@ -76,31 +91,33 @@ DEMO_SCRIPT: list[ScenarioStep] = [
         label="4. GE07 returns damaged",
         event_trigger="return_damaged_ge07",
         question=(
-            "GE07 just returned from M01. Post-mission inspection found hydraulic fault — "
-            "maintenance team says 8 hours minimum. We still need 2 aircraft for M03 DCA at 14:00. "
+            "GE07 just returned from a RECCE sortie with a hydraulic fault — "
+            "maintenance says 16 hours minimum. We still need 2 aircraft for M03 DCA at 20:00. "
             "Can we meet the ATO, or do we need to report a shortfall to command?"
         ),
         notes=(
-            "Now GE03, GE05, GE07 are all unavailable. "
-            "Remaining green: GE01, GE02, GE04, GE06, GE08, LO21. "
-            "LO21 is GlobalEye (AEW) — not suited for DCA. "
-            "So we have GE01/GE02/GE04/GE06/GE08 = 5 green Gripens. Enough for M03×2. "
-            "AI should say yes, but the fleet is getting thin."
+            "Now GE05, GE06, GE07 all unavailable (3 aircraft in maintenance). "
+            "Remaining DCA/CAP (green): GE01 (180h), GF01 (155h), GE03 (110h), GE08 (20h — critical). "
+            "GF02 is returning from on_mission status. "
+            "AI should say yes, M03 is achievable with GE01+GF01, but fleet is getting thin. "
+            "Should advise against using GE08 (20h — next heavy service imminent)."
         ),
     ),
 
     ScenarioStep(
-        label="5. Cannibalize GE09 or wait?",
+        label="5. Radar UE — use now or hold in reserve?",
         question=(
-            "GE05 needs a Radar exchange unit for its 6h repair, but we only have 1 UE left "
-            "and GE09 is already cannibalized. Resupply is 12–24 hours away. "
-            "Should we use the last Radar UE on GE05, or hold it in reserve for a worse case?"
+            "GE05 is in maintenance with a complex LRU fault (6h repair). "
+            "We have 3 Radar exchange units available, but resupply is uncertain "
+            "and we could face more faults on high-life aircraft. "
+            "Should we use one UE on GE05 now, or hold them in reserve?"
         ),
         notes=(
-            "This is the key dilemma question. AI should weigh: "
-            "GE05 has 34h life — borderline worth the UE. "
-            "Holding the UE preserves flexibility if another radar fault hits. "
-            "Expected answer: use the UE on GE05 IF M04 is critical, otherwise hold it."
+            "Key dilemma: resource conservation vs. speed of recovery. "
+            "GE05 has 62h remaining — borderline worth a UE. "
+            "Holding preserves 3 UEs for higher-value aircraft like GE01 (180h) or GF01 (155h). "
+            "Expected answer: use UE on GE05 if M01 or another DCA mission is critical right now; "
+            "otherwise conserve — we already have GE03 and GF01 available for DCA."
         ),
     ),
 
@@ -113,18 +130,24 @@ DEMO_SCRIPT: list[ScenarioStep] = [
             "What's our expected sortie generation rate?"
         ),
         notes=(
-            "GE05 is at 34h — hits heavy service in ~2 days if flying. "
-            "Robot-1: 14 remaining, missions burn ~3–5 per sortie. "
-            "At current ATO pace, may hit shortage by Day 3–4. "
-            "AI should recommend requesting resupply now and flagging GE05 for scheduling light duty."
+            "GE08 (20h) is critically low — hits heavy service after the next sortie. "
+            "GE07 (35h) will follow within 2 sorties. "
+            "GE01 (180h) and GF01 (155h) are in best shape. "
+            "Robot-1: 14 remaining — missions burn 1-2 per sortie. Could run short by Day 3-4. "
+            "AI should recommend grounding GE08 immediately, light duty for GE07, "
+            "and requesting Robot-1 resupply now."
         ),
     ),
 
     # --- Bonus / rapid-fire ---
     ScenarioStep(
-        label="7. Best aircraft for RECCE right now",
+        label="7. Best aircraft for urgent RECCE right now",
         question="Which single aircraft is best suited for an urgent RECCE sortie right now?",
-        notes="Quick allocation question. Answer should be GE06 (already RECCE config, 110h life).",
+        notes=(
+            "Answer should be GE02 (already RECCE config, 145h remaining). "
+            "GE07 is also RECCE config but has only 35h — flag as risky for another sortie. "
+            "GE06 is in maintenance — unavailable."
+        ),
     ),
 
     ScenarioStep(
@@ -134,8 +157,10 @@ DEMO_SCRIPT: list[ScenarioStep] = [
             "and which are underused?"
         ),
         notes=(
-            "GE05 (34h) is dangerously low. GE04 (175h) and LO21 (320h) have most life left. "
-            "AI should suggest resting GE05 and prioritizing GE04 for next missions."
+            "GE08 (20h) is dangerously low — must be rested immediately. "
+            "GE07 (35h) also critical. GE05 (62h) and GE04 (85h) are getting there. "
+            "GE01 (180h) and GF01 (155h) have most life remaining — they are underused. "
+            "AI should suggest resting GE07/GE08, prioritizing GE01/GF01/GE03 for next sorties."
         ),
     ),
 ]
@@ -150,7 +175,7 @@ QUICK_QUESTIONS: list[str] = [
     "Can we handle 2 extra DCA sorties in the next 12 hours?",
     "What's the impact of losing GE05 for 6 hours?",
     "What's our readiness forecast for the next 48 hours?",
-    "Should I cannibalize GE03 for the radar unit or wait for resupply?",
+    "Should I use a Radar UE on GE05 or hold it in reserve?",
     "What's the current fleet status summary?",
     "Which missions are at risk right now?",
     "What resources are running critically low?",

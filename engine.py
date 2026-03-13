@@ -325,6 +325,8 @@ def assign_aircraft(state: BaseState, mission_id: str, aircraft_ids: list[str]) 
         ac = _find_aircraft(state, ac_id)
         if ac.status != "green":
             raise ValueError(f"Cannot assign {ac_id}: status is '{ac.status}' (must be green)")
+        if ac.configuration != mission.required_config:
+            _log(state, f"WARNING: {ac_id} config '{ac.configuration}' ≠ mission {mission_id} required '{mission.required_config}' — reconfiguration needed before departure")
         ac.status = "on_mission"
         ac.location = "on_mission"
     mission.assigned_aircraft = list(aircraft_ids)
@@ -410,11 +412,17 @@ def consume_resources(
     weapons_expended: dict[str, int] = {}
     for ac_id in mission.assigned_aircraft:
         ac = _find_aircraft(state, ac_id)
+        # Count how many of each weapon type this aircraft carries
+        payload_counts: dict[str, int] = {}
         for weapon in ac.current_payload:
+            payload_counts[weapon] = payload_counts.get(weapon, 0) + 1
+        # Expend fraction of each weapon type carried
+        for weapon, count in payload_counts.items():
             if weapon in state.resources.weapons:
-                expend = max(1, int(fraction * 1))  # 1 per weapon slot expended
-                state.resources.weapons[weapon] = max(0, state.resources.weapons[weapon] - expend)
-                weapons_expended[weapon] = weapons_expended.get(weapon, 0) + expend
+                expend = round(fraction * count)
+                if expend > 0:
+                    state.resources.weapons[weapon] = max(0, state.resources.weapons[weapon] - expend)
+                    weapons_expended[weapon] = weapons_expended.get(weapon, 0) + expend
 
     weapons_str = ", ".join(f"{k}×{v}" for k, v in weapons_expended.items()) if weapons_expended else "none"
     _log(state, f"Mission {mission_id} resources consumed: fuel {fuel_used}L, weapons: {weapons_str}")

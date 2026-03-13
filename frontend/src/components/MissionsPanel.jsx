@@ -79,6 +79,12 @@ export default function MissionsPanel({ state, onAssign }) {
 
   const handleAssign = async () => {
     if (!selectedMission || selectedAircraft.length === 0) return
+    if (hasMismatch) {
+      const ok = window.confirm(
+        `Config mismatch: not all selected aircraft match the required config "${selectedMissionObj.required_config}".\n\nThey will need reconfiguration before departure. Proceed anyway?`
+      )
+      if (!ok) return
+    }
     setAssigning(true)
     setError(null)
     try {
@@ -168,7 +174,10 @@ export default function MissionsPanel({ state, onAssign }) {
         {/* Mission bars */}
         {missions.map(m => {
           const start      = (m.departure_hour / 24) * 100
-          const width      = Math.max(2, ((m.return_hour - m.departure_hour) / 24) * 100)
+          const duration   = m.return_hour > m.departure_hour
+            ? m.return_hour - m.departure_hour
+            : 24 - m.departure_hour + m.return_hour
+          const width      = Math.max(2, (duration / 24) * 100)
           const assigned   = m.assigned_aircraft ?? []
           const unassigned = assigned.length === 0
           const barColor   = unassigned ? '#f85149' : (TYPE_BG[m.type] ?? '#484f58')

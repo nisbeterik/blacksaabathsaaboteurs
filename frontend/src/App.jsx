@@ -35,6 +35,8 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [toast, setToast] = useState(null)
+  const [backendError, setBackendError] = useState(false)
+  const [demoScenarios, setDemoScenarios] = useState([])
   const pollRef = useRef(null)
 
   const showToast = (msg, type = 'info') => {
@@ -46,8 +48,9 @@ export default function App() {
     try {
       const data = await apiFetch('/api/state')
       setState(data)
-    } catch (e) {
-      // silently ignore poll errors
+      setBackendError(false)
+    } catch {
+      setBackendError(true)
     }
   }, [])
 
@@ -70,6 +73,11 @@ export default function App() {
     }
   }, [fetchState])
 
+  // Fetch demo script once on mount
+  useEffect(() => {
+    apiFetch('/api/demo/scenarios').then(setDemoScenarios).catch(() => {})
+  }, [])
+
   const runAction = async (path, body = null) => {
     setActionLoading(true)
     try {
@@ -78,6 +86,10 @@ export default function App() {
         body: body ? JSON.stringify(body) : undefined,
       })
       setState(data)
+      // Clear frontend chat when state resets (backend already cleared LLM history)
+      if (path === '/api/action/reset' && data.chat_cleared) {
+        setMessages([])
+      }
       // Surface what the random event actually was
       if (path === '/api/action/random-event' && data.event_log?.length) {
         showToast(data.event_log[data.event_log.length - 1], 'info')
@@ -113,6 +125,23 @@ export default function App() {
     setMessages([])
   }
 
+  // Run a demo script step: apply event trigger on backend, update state, pre-fill chat input
+  const runDemoStep = async (label) => {
+    setActionLoading(true)
+    try {
+      const data = await apiFetch('/api/demo/run', {
+        method: 'POST',
+        body: JSON.stringify({ label }),
+      })
+      setState(data.state)
+      setChatInput(data.question)
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const ready     = state?.aircraft?.filter(a => a.status === 'green').length ?? 0
   const onMission = state?.aircraft?.filter(a => a.status === 'on_mission').length ?? 0
   const inMaint   = state?.aircraft?.filter(a => a.status === 'red').length ?? 0
@@ -120,6 +149,13 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-base text-text-hi overflow-hidden">
+
+      {/* Backend error banner */}
+      {backendError && (
+        <div className="flex-shrink-0 bg-col-red/20 border-b border-col-red/50 px-4 py-1.5 text-xs text-col-red font-semibold text-center">
+          ⚠ Backend unreachable — retrying... Check that the API server is running.
+        </div>
+      )}
 
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 bg-surface border-b border-border flex-shrink-0">
@@ -195,7 +231,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-3 bg-base">
             {!state && (
               <div className="flex items-center justify-center h-full text-text-dim text-sm">
-                Loading state...
+                {backendError ? 'Backend unreachable.' : 'Loading state...'}
               </div>
             )}
             {state && activeTab === 'Fleet'     && (
@@ -230,6 +266,9 @@ export default function App() {
             onInputChange={setChatInput}
             onSend={sendChat}
             onClear={clearChat}
+            scenarios={demoScenarios}
+            onRunScenario={runDemoStep}
+            actionLoading={actionLoading}
           />
         </div>
       </div>

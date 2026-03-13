@@ -98,7 +98,8 @@ def serialize_state(state: BaseState) -> str:
     lines.append("--- WEAR LEVELS (hours to heavy service, ascending) ---")
     sorted_ac = sorted(state.aircraft, key=lambda a: a.remaining_life)
     for ac in sorted_ac:
-        bar = "█" * (ac.remaining_life // 10) + "░" * (20 - ac.remaining_life // 10)
+        filled = min(20, ac.remaining_life // 10)
+        bar = "█" * filled + "░" * (20 - filled)
         lines.append(f"  {ac.id}: {ac.remaining_life:3d}h [{bar}]")
     lines.append("")
 
@@ -314,13 +315,11 @@ class LLMAssistant:
                 last_error = e
                 continue
 
-        # Both models failed
+        # Both models failed — do NOT add to history so the user can retry cleanly
         error_reply = (
             f"⚠ LLM unavailable: {last_error}\n\n"
             "Operating in offline mode. Please consult paper-based SOPs."
         )
-        # Still add to history so the conversation flow is preserved
-        self._history.append((user_message, error_reply))
         return error_reply
 
     @property

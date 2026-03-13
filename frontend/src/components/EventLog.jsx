@@ -28,9 +28,11 @@ function fmtTime(date) {
 }
 
 export default function EventLog({ events }) {
+  const scrollRef    = useRef(null)
   const bottomRef    = useRef(null)
   const timestampRef = useRef([])
   const [filter, setFilter] = useState('all')
+  const [atBottom, setAtBottom] = useState(true)
 
   const now = new Date()
   events.forEach((_, i) => {
@@ -40,34 +42,59 @@ export default function EventLog({ events }) {
     timestampRef.current = timestampRef.current.slice(0, events.length)
   }
 
-  const visible = events.filter(ev => filter === 'all' || classifyEvent(ev) === filter)
-
+  // Only auto-scroll when new events arrive if the user is already at the bottom
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [events, filter])
+    if (atBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [events, filter, atBottom])
+
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30
+    setAtBottom(isAtBottom)
+  }
 
   return (
     <div className="h-full flex flex-col bg-base">
       <div className="px-3 py-1.5 border-b border-border flex-shrink-0 flex items-center justify-between">
         <span className="text-xs text-text-dim uppercase tracking-wider">Event Log</span>
-        <div className="flex gap-1">
-          {FILTERS.map(f => (
+        <div className="flex items-center gap-2">
+          {!atBottom && (
             <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`text-xs px-2 py-0.5 rounded transition-colors
-                ${filter === f.key
-                  ? 'bg-raised text-text-hi border border-border'
-                  : 'text-text-dim hover:text-text-lo'
-                }`}
+              onClick={() => {
+                bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+                setAtBottom(true)
+              }}
+              className="text-xs text-col-blue hover:underline"
             >
-              {f.label}
+              ↓ Latest
             </button>
-          ))}
+          )}
+          <div className="flex gap-1">
+            {FILTERS.map(f => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`text-xs px-2 py-0.5 rounded transition-colors
+                  ${filter === f.key
+                    ? 'bg-raised text-text-hi border border-border'
+                    : 'text-text-dim hover:text-text-lo'
+                  }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-3 py-1 space-y-0.5 font-mono">
-        {visible.length === 0 && (
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="flex-1 overflow-y-auto px-3 py-1 space-y-0.5 font-mono"
+      >
+        {events.length === 0 && (
           <div className="text-xs text-text-dim py-2">No events{filter !== 'all' ? ' matching filter' : ''}.</div>
         )}
         {events.map((ev, i) => {
