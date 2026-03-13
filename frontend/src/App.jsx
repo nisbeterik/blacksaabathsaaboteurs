@@ -288,7 +288,7 @@ export default function App() {
 
       {/* Control bar */}
       <div className="flex-shrink-0 border-t border-border bg-surface px-3 py-2">
-        <ControlBar onAction={runAction} loading={actionLoading} />
+        <ControlBar onAction={runAction} loading={actionLoading} scenarios={demoScenarios.slice(0, 3)} onRunScenario={runDemoStep} />
       </div>
 
       {/* Toast */}

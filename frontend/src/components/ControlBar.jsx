@@ -4,7 +4,13 @@ const TIME_ACTIONS = [
   { label: '+12h', hours: 12 },
 ]
 
-export default function ControlBar({ onAction, loading }) {
+const SCENARIO_COLORS = [
+  'border-col-blue  text-col-blue  hover:bg-col-blue/10',
+  'border-col-red   text-col-red   hover:bg-col-red/10',
+  'border-col-amber text-col-amber hover:bg-col-amber/10',
+]
+
+export default function ControlBar({ onAction, loading, scenarios = [], onRunScenario }) {
   const handleReset = () => {
     if (window.confirm('Reset all state to initial? This cannot be undone.')) {
       onAction('/api/action/reset')
@@ -13,6 +19,31 @@ export default function ControlBar({ onAction, loading }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+
+      {/* Scenario buttons */}
+      {scenarios.length > 0 && (
+        <>
+          <div className="flex gap-1.5">
+            {scenarios.map((s, i) => (
+              <button
+                key={s.label}
+                onClick={() => onRunScenario(s.label)}
+                disabled={loading}
+                title={s.label}
+                className={`flex flex-col items-center px-3 py-1 border rounded text-xs font-semibold
+                  transition-colors disabled:opacity-40 disabled:cursor-not-allowed
+                  ${SCENARIO_COLORS[i % SCENARIO_COLORS.length]}`}
+              >
+                <span>Sc{i + 1}</span>
+                <span className="text-[10px] opacity-70 font-normal max-w-[72px] truncate">
+                  {s.label.replace(/^\d+\.\s*/, '')}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-8 bg-border" />
+        </>
+      )}
 
       {/* Time controls */}
       <div className="flex gap-1">
