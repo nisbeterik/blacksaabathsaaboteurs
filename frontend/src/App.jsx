@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, createContext } from 'react'
 import FleetPanel from './components/FleetPanel'
 import MissionsPanel from './components/MissionsPanel'
 import ResourcesPanel from './components/ResourcesPanel'
 import ChatPanel from './components/ChatPanel'
 import EventLog from './components/EventLog'
 import ControlBar from './components/ControlBar'
+
+export const TooltipCtx = createContext(true)
 
 const TABS = ['Fleet', 'Missions', 'Resources']
 
@@ -36,6 +38,7 @@ export default function App() {
   const [actionLoading, setActionLoading] = useState(false)
   const [toast, setToast] = useState(null)
   const [backendError, setBackendError] = useState(false)
+  const [tooltipsEnabled, setTooltipsEnabled] = useState(true)
   const [demoScenarios, setDemoScenarios] = useState([])
   const pollRef = useRef(null)
 
@@ -148,6 +151,7 @@ export default function App() {
   const grey      = state?.aircraft?.filter(a => a.status === 'grey').length ?? 0
 
   return (
+    <TooltipCtx.Provider value={tooltipsEnabled}>
     <div className="flex flex-col h-screen bg-base text-text-hi overflow-hidden">
 
       {/* Backend error banner */}
@@ -177,6 +181,15 @@ export default function App() {
               >
                 {state.phase}
               </span>
+              <span className="text-text-dim">|</span>
+              <button
+                onClick={() => setTooltipsEnabled(v => !v)}
+                className={`text-xs px-2 py-0.5 rounded border transition-colors
+                  ${tooltipsEnabled ? 'border-col-blue/50 text-col-blue' : 'border-border text-text-dim'}`}
+                title="Toggle help tooltips on acronyms and terms"
+              >
+                {tooltipsEnabled ? 'ⓘ Help ON' : 'ⓘ Help OFF'}
+              </button>
               <span className="text-text-dim">|</span>
               <span
                 className="text-col-green cursor-pointer hover:underline"
@@ -286,5 +299,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </TooltipCtx.Provider>
   )
 }
