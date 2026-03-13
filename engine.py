@@ -358,6 +358,9 @@ def trigger_fault(
     fault_roll: 1-6 to select fault type; rolls randomly if omitted.
     """
     ac = _find_aircraft(state, aircraft_id)
+    if ac.status == "red":
+        raise ValueError(f"Cannot fault {aircraft_id}: already in maintenance")
+
     fault_info = roll_fault_type(fault_roll)
     variance = roll_maintenance_variance()
     hours = int(fault_info["hours"] * variance)
