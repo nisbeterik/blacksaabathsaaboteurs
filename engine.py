@@ -61,7 +61,7 @@ FUEL_PER_SORTIE = 4000  # liters per Gripen sortie
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton (used by Gradio UI and LLM layer)
+# Module-level singleton
 # ---------------------------------------------------------------------------
 _state: BaseState | None = None
 
