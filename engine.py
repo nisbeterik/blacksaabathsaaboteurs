@@ -321,6 +321,19 @@ def _log(state: BaseState, msg: str) -> None:
 def assign_aircraft(state: BaseState, mission_id: str, aircraft_ids: list[str]) -> BaseState:
     """Assign a list of aircraft to a mission. Aircraft must be green."""
     mission = _find_mission(state, mission_id)
+
+    # Release previously assigned aircraft that are being replaced
+    for prev_id in list(mission.assigned_aircraft):
+        if prev_id not in aircraft_ids:
+            try:
+                prev_ac = _find_aircraft(state, prev_id)
+                if prev_ac.status == "on_mission":
+                    prev_ac.status = "green"
+                    prev_ac.location = "flight_line"
+                    _log(state, f"{prev_id} unassigned from mission {mission_id} — returned to flight line")
+            except ValueError:
+                pass
+
     for ac_id in aircraft_ids:
         ac = _find_aircraft(state, ac_id)
         if ac.status != "green":
@@ -329,6 +342,7 @@ def assign_aircraft(state: BaseState, mission_id: str, aircraft_ids: list[str]) 
             _log(state, f"WARNING: {ac_id} config '{ac.configuration}' ≠ mission {mission_id} required '{mission.required_config}' — reconfiguration needed before departure")
         ac.status = "on_mission"
         ac.location = "on_mission"
+
     mission.assigned_aircraft = list(aircraft_ids)
     _log(state, f"Assigned {', '.join(aircraft_ids)} to mission {mission_id} ({mission.type})")
     return state
@@ -469,12 +483,15 @@ def return_from_mission(
     ac.remaining_life = max(0, ac.remaining_life - flight_hours)
     ac.total_flight_hours += flight_hours
 
+    # Consume fuel for this sortie
+    state.resources.fuel = max(0, state.resources.fuel - FUEL_PER_SORTIE)
+
     # Remove from any mission's assigned list
     for mission in state.ato.missions:
         if aircraft_id in mission.assigned_aircraft:
             mission.assigned_aircraft.remove(aircraft_id)
 
-    _log(state, f"{aircraft_id} returned from mission ({flight_hours}h) — life remaining: {ac.remaining_life}h")
+    _log(state, f"{aircraft_id} returned from mission ({flight_hours}h) — life remaining: {ac.remaining_life}h | fuel -{FUEL_PER_SORTIE}L → {state.resources.fuel:,}L")
 
     if do_post_mission_roll:
         passed, fault_roll = roll_post_mission()

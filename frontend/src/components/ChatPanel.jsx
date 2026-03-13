@@ -108,7 +108,7 @@ export default function ChatPanel({
           <div className="text-xs text-text-dim uppercase tracking-wider px-1 pb-1">
             Demo Script — click a step to load
           </div>
-          {scenarios.map((s) => (
+          {scenarios.map((s, i) => (
             <button
               key={s.label}
               onClick={() => loadScenario(s.label)}
@@ -116,6 +116,7 @@ export default function ChatPanel({
               className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-surface border border-transparent
                 hover:border-border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
+              <span className="text-text-dim mr-1.5 font-mono">{String(i + 1).padStart(2, '0')}.</span>
               <span className="text-text-hi">{s.label}</span>
               {s.has_event && (
                 <span className="ml-1.5 text-col-amber" title="Triggers a state mutation">⚡</span>

@@ -84,7 +84,11 @@ function AircraftCard({ ac, mission, onAction }) {
       <div className="flex gap-1 pt-0.5">
         {ac.status === 'green' && (
           <button
-            onClick={() => onAction('/api/action/trigger-fault', { aircraft_id: ac.id })}
+            onClick={() => {
+              if (window.confirm(`Trigger a random fault on ${ac.id}? This will put it into maintenance.`)) {
+                onAction('/api/action/trigger-fault', { aircraft_id: ac.id })
+              }
+            }}
             className="flex-1 py-0.5 text-xs border border-col-red/40 text-col-red hover:bg-col-red/10 rounded transition-colors"
           >
             Trigger Fault

@@ -135,7 +135,7 @@ def serialize_state(state: BaseState) -> str:
 
     # Recent event log
     lines.append("--- RECENT EVENTS ---")
-    for event in state.event_log[-10:]:   # last 10 events only
+    for event in state.event_log[-20:]:
         lines.append(f"  {event}")
 
     return "\n".join(lines)
@@ -156,9 +156,15 @@ CONTEXT:
 - Key principle: keep the fleet evenly worn. Avoid sending the same aircraft repeatedly or letting multiple aircraft hit heavy service simultaneously.
 - Phase "Fred" = peacetime, "Kris" = crisis, "Krig" = war — escalate urgency and risk tolerance accordingly.
 
+LIFE THRESHOLDS (hard rules):
+- remaining_life ≤ 20h: GROUNDED — must not fly. Heavy service is imminent and mandatory.
+- remaining_life ≤ 30h: CRITICAL — fly only if mission-critical and no alternatives exist. Flag risk explicitly.
+- remaining_life ≤ 50h: CAUTION — prefer alternatives. If used, heavy service planning must start now.
+- remaining_life > 100h: PREFERRED — prioritize for sorties to keep wear distribution even.
+
 DECISION FRAMEWORK:
 When recommending aircraft allocation, consider (in order):
-1. Remaining life — prefer aircraft with more hours remaining (don't burn low-life aircraft on routine missions)
+1. Remaining life — apply the hard thresholds above; prefer aircraft with more hours remaining
 2. Configuration match — prefer aircraft already configured for the mission type (reconfiguration takes time and personnel)
 3. Fleet balance — maintain even wear distribution across the fleet
 4. Maintenance queue — don't allocate aircraft that may need service soon or are already in maintenance
