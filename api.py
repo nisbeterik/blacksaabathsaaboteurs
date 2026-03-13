@@ -24,7 +24,7 @@ from engine import (
     get_state, reset_state, serialize_state_json,
     trigger_fault, complete_maintenance,
     advance_time, return_from_mission, assign_aircraft,
-    generate_random_event, generate_new_ato,
+    generate_random_event, generate_new_ato, recall_aircraft, set_phase,
 )
 from llm_integration import LLMAssistant
 from demo_scenarios import DEMO_SCRIPT
@@ -63,6 +63,9 @@ class AssignAircraftRequest(BaseModel):
 
 class AircraftIdRequest(BaseModel):
     aircraft_id: str
+
+class SetPhaseRequest(BaseModel):
+    phase: str
 
 class DemoRunRequest(BaseModel):
     label: str
@@ -153,6 +156,22 @@ def api_random_event():
 @app.post("/api/action/new-ato")
 def api_new_ato():
     generate_new_ato(get_state())
+    return serialize_state_json(get_state())
+
+@app.post("/api/action/recall-aircraft")
+def api_recall_aircraft(body: AircraftIdRequest):
+    try:
+        recall_aircraft(get_state(), body.aircraft_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return serialize_state_json(get_state())
+
+@app.post("/api/action/set-phase")
+def api_set_phase(body: SetPhaseRequest):
+    try:
+        set_phase(get_state(), body.phase)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return serialize_state_json(get_state())
 
 
