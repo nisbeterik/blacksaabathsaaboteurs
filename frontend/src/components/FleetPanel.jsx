@@ -17,7 +17,7 @@ function lifeTextColor(life) {
   return 'text-col-red'
 }
 
-function AircraftCard({ ac, mission }) {
+function AircraftCard({ ac, mission, onAction }) {
   const s = STATUS_CONFIG[ac.status] ?? STATUS_CONFIG.grey
   const lifePct = Math.min(100, Math.round((ac.remaining_life / 200) * 100))
 
@@ -47,22 +47,28 @@ function AircraftCard({ ac, mission }) {
         </div>
       </div>
 
-      {/* Config + mission/location */}
+      {/* Flight hours + config row */}
       <div className="flex items-center justify-between text-xs">
         <span className="text-text-lo">{ac.configuration}</span>
-        {ac.status === 'on_mission' && mission
-          ? <span className="text-col-blue font-semibold">{mission}</span>
-          : <span className="text-text-dim">{ac.location}</span>
-        }
+        <span className="text-text-dim">{ac.total_flight_hours}h total</span>
+      </div>
+
+      {/* Config + mission/location */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-text-dim">{ac.location}</span>
+        {ac.status === 'on_mission' && mission && (
+          <span className="text-col-blue font-semibold">{mission}</span>
+        )}
+        {ac.maintenance_eta != null && (
+          <span className="text-col-amber font-semibold">{ac.maintenance_eta}h ETA</span>
+        )}
       </div>
 
       {/* Payload */}
       {ac.current_payload?.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {ac.current_payload.map((p, i) => (
-            <span key={i} className="px-1.5 py-0.5 bg-raised text-text-dim text-xs rounded">
-              {p}
-            </span>
+            <span key={i} className="px-1.5 py-0.5 bg-raised text-text-dim text-xs rounded">{p}</span>
           ))}
         </div>
       )}
@@ -70,23 +76,57 @@ function AircraftCard({ ac, mission }) {
       {/* Fault */}
       {ac.fault && (
         <div className="bg-col-red/10 border border-col-red/30 rounded px-2 py-1 text-xs text-col-red">
-          {ac.fault}{ac.maintenance_eta != null ? ` — ${ac.maintenance_eta}h remaining` : ''}
+          {ac.fault}
         </div>
       )}
+
+      {/* Action buttons */}
+      <div className="flex gap-1 pt-0.5">
+        {ac.status === 'green' && (
+          <button
+            onClick={() => onAction('/api/action/trigger-fault', { aircraft_id: ac.id })}
+            className="flex-1 py-0.5 text-xs border border-col-red/40 text-col-red hover:bg-col-red/10 rounded transition-colors"
+          >
+            Trigger Fault
+          </button>
+        )}
+        {ac.status === 'red' && (
+          <button
+            onClick={() => onAction('/api/action/complete-maintenance', { aircraft_id: ac.id })}
+            className="flex-1 py-0.5 text-xs border border-col-green/40 text-col-green hover:bg-col-green/10 rounded transition-colors"
+          >
+            Complete Maint
+          </button>
+        )}
+        {ac.status === 'on_mission' && (
+          <button
+            onClick={() => onAction('/api/action/return-from-mission', { aircraft_id: ac.id })}
+            className="flex-1 py-0.5 text-xs border border-col-blue/40 text-col-blue hover:bg-col-blue/10 rounded transition-colors"
+          >
+            Return
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
-export default function FleetPanel({ state }) {
+export default function FleetPanel({ state, onAction, fleetFilter, onClearFilter }) {
   const aircraft = state?.aircraft ?? []
 
-  // Build reverse map: aircraft ID -> mission ID
   const missionByAircraft = {}
   ;(state?.ato?.missions ?? []).forEach(m => {
     ;(m.assigned_aircraft ?? []).forEach(id => {
       missionByAircraft[id] = m.id
     })
   })
+
+  const allGroups = [
+    { key: 'green',      label: 'Ready' },
+    { key: 'on_mission', label: 'Airborne' },
+    { key: 'red',        label: 'Maintenance' },
+    { key: 'grey',       label: 'Cannibalized' },
+  ]
 
   const groups = {
     green:      aircraft.filter(a => a.status === 'green'),
@@ -95,41 +135,63 @@ export default function FleetPanel({ state }) {
     grey:       aircraft.filter(a => a.status === 'grey'),
   }
 
+  const visibleGroups = fleetFilter
+    ? allGroups.filter(g => g.key === fleetFilter)
+    : allGroups.filter(g => groups[g.key].length > 0)
+
   return (
     <div className="space-y-4">
-      {/* Wear summary */}
-      <div className="bg-surface border border-border rounded p-3">
-        <div className="text-xs text-text-dim uppercase tracking-wider mb-2">Fleet Wear — hours to heavy service</div>
-        <div className="space-y-1.5">
-          {[...aircraft].sort((a, b) => a.remaining_life - b.remaining_life).map(ac => (
-            <div key={ac.id} className="flex items-center gap-2">
-              <span className="text-xs text-text-lo w-10 flex-shrink-0">{ac.id}</span>
-              <div className="flex-1 h-2 bg-raised rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${lifeColor(ac.remaining_life)}`}
-                  style={{ width: `${Math.min(100, (ac.remaining_life / 200) * 100)}%` }}
-                />
-              </div>
-              <span className={`text-xs w-12 text-right flex-shrink-0 ${lifeTextColor(ac.remaining_life)}`}>
-                {ac.remaining_life}h
-              </span>
-            </div>
-          ))}
+
+      {/* Active filter banner */}
+      {fleetFilter && (
+        <div className="flex items-center justify-between bg-raised border border-border rounded px-3 py-1.5">
+          <span className="text-xs text-text-lo">
+            Filtered: <span className="text-text-hi font-semibold capitalize">{fleetFilter.replace('_', ' ')}</span>
+          </span>
+          <button
+            onClick={onClearFilter}
+            className="text-xs text-text-dim hover:text-text-hi transition-colors"
+          >
+            Clear filter ×
+          </button>
         </div>
-      </div>
+      )}
+
+      {/* Wear summary — hidden when filtered */}
+      {!fleetFilter && (
+        <div className="bg-surface border border-border rounded p-3">
+          <div className="text-xs text-text-dim uppercase tracking-wider mb-2">Fleet Wear — hours to heavy service</div>
+          <div className="space-y-1.5">
+            {[...aircraft].sort((a, b) => a.remaining_life - b.remaining_life).map(ac => (
+              <div key={ac.id} className="flex items-center gap-2">
+                <span className="text-xs text-text-lo w-10 flex-shrink-0">{ac.id}</span>
+                <div className="flex-1 h-2 bg-raised rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${lifeColor(ac.remaining_life)}`}
+                    style={{ width: `${Math.min(100, (ac.remaining_life / 200) * 100)}%` }}
+                  />
+                </div>
+                <span className={`text-xs w-12 text-right flex-shrink-0 ${lifeTextColor(ac.remaining_life)}`}>
+                  {ac.remaining_life}h
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Aircraft cards grouped by status */}
-      {[
-        { key: 'green',      label: 'Ready' },
-        { key: 'on_mission', label: 'Airborne' },
-        { key: 'red',        label: 'Maintenance' },
-        { key: 'grey',       label: 'Cannibalized' },
-      ].filter(g => groups[g.key].length > 0).map(g => (
+      {visibleGroups.map(g => (
         <div key={g.key}>
           <div className="text-xs text-text-dim uppercase tracking-wider mb-2">{g.label} ({groups[g.key].length})</div>
           <div className="grid grid-cols-2 gap-2">
             {groups[g.key].map(ac => (
-              <AircraftCard key={ac.id} ac={ac} mission={missionByAircraft[ac.id]} />
+              <AircraftCard
+                key={ac.id}
+                ac={ac}
+                mission={missionByAircraft[ac.id]}
+                onAction={onAction}
+              />
             ))}
           </div>
         </div>
