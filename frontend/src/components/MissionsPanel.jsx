@@ -1,4 +1,4 @@
-import { useState, useContext } from 'react'
+import { useState, useContext, useRef, useEffect } from 'react'
 import { TooltipCtx } from '../App'
 import Tooltip from './Tooltip'
 import { GLOSSARY } from '../tooltips'
@@ -86,6 +86,13 @@ export default function MissionsPanel({ state, onAssign }) {
   const [selectedAircraft, setSelectedAircraft] = useState([])
   const [assigning, setAssigning]               = useState(false)
   const [error, setError]                       = useState(null)
+  const assignFormRef = useRef(null)
+
+  useEffect(() => {
+    if (selectedMission) {
+      assignFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [selectedMission])
 
   const greenAircraft      = aircraft.filter(a => a.status === 'green')
   const selectedMissionObj = missions.find(m => m.id === selectedMission)
@@ -205,8 +212,16 @@ export default function MissionsPanel({ state, onAssign }) {
               </div>
               <div className="flex-1 h-5 bg-raised rounded relative">
                 <div
-                  className="absolute h-full rounded flex items-center px-1.5 text-xs font-semibold text-white overflow-hidden whitespace-nowrap"
-                  style={{ left: `${start}%`, width: `${width}%`, backgroundColor: barColor, opacity: 0.9 }}
+                  onClick={() => { setSelectedMission(m.id); setSelectedAircraft([]) }}
+                  className="absolute h-full rounded flex items-center px-1.5 text-xs font-semibold text-white overflow-hidden whitespace-nowrap cursor-pointer hover:brightness-125 transition-[filter]"
+                  style={{
+                    left: `${start}%`,
+                    width: `${width}%`,
+                    backgroundColor: barColor,
+                    opacity: 0.9,
+                    outline: selectedMission === m.id ? '2px solid #58a6ff' : 'none',
+                    outlineOffset: '1px',
+                  }}
                 >
                   {unassigned ? 'UNASSIGNED' : assigned.join(' ')}
                 </div>
@@ -242,7 +257,7 @@ export default function MissionsPanel({ state, onAssign }) {
       </div>
 
       {/* Assign form */}
-      <div className="bg-surface border border-border rounded p-3 space-y-3">
+      <div ref={assignFormRef} className="bg-surface border border-border rounded p-3 space-y-3">
         <div className="text-xs text-text-dim uppercase tracking-wider">Assign Aircraft to Mission</div>
 
         <div>
