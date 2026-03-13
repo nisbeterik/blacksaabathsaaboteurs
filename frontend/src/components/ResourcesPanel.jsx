@@ -3,13 +3,14 @@ import {
 } from 'recharts'
 
 const DARK = {
-  bg: '#161b22',
   border: '#30363d',
-  text: '#8b949e',
-  textHi: '#e6edf3',
+  text:   '#8b949e',
 }
 
-function ResourceBar({ label, value, max, color = '#1f6feb', unit = '' }) {
+const BAR_COLORS = ['#1f6feb', '#3fb950', '#d29922', '#f85149', '#8b949e', '#58a6ff']
+
+// Defined outside the parent so React never remounts it on re-render
+function ResourceBar({ label, value, max, unit = '' }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
   const barColor = pct > 50 ? '#3fb950' : pct > 20 ? '#d29922' : '#f85149'
   return (
@@ -28,46 +29,34 @@ function ResourceBar({ label, value, max, color = '#1f6feb', unit = '' }) {
   )
 }
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (active && payload?.length) {
-    return (
-      <div className="bg-raised border border-border rounded px-3 py-2 text-xs text-text-hi shadow-lg">
-        <div className="font-semibold mb-1">{label}</div>
-        {payload.map((p, i) => (
-          <div key={i} style={{ color: p.color }}>{p.value}</div>
-        ))}
-      </div>
-    )
-  }
-  return null
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: '#1c2128', border: '1px solid #30363d', borderRadius: 4, padding: '6px 10px' }}>
+      <div style={{ color: '#e6edf3', fontWeight: 600, marginBottom: 2, fontSize: 11 }}>{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.fill, fontSize: 11 }}>{p.value}</div>
+      ))}
+    </div>
+  )
 }
 
-export default function ResourcesPanel({ state }) {
-  const r = state?.resources
-  if (!r) return null
-
-  const fuelMax = 100000
-  const weaponsData = Object.entries(r.weapons ?? {}).map(([k, v]) => ({ name: k, value: v }))
-  const euData = Object.entries(r.exchange_units ?? {}).map(([k, v]) => ({ name: k, value: v }))
-  const personnelData = Object.entries(r.personnel ?? {}).map(([k, v]) => ({ name: k, value: v }))
-
-  const barColors = ['#1f6feb', '#3fb950', '#d29922', '#f85149', '#8b949e', '#58a6ff']
-
-  const ChartContainer = ({ title, data, maxY }) => (
+function ChartCard({ title, data }) {
+  return (
     <div className="bg-surface border border-border rounded p-3">
       <div className="text-xs text-text-dim uppercase tracking-wider mb-3">{title}</div>
       {data.length === 0
         ? <div className="text-xs text-text-dim">No data</div>
         : (
-          <ResponsiveContainer width="100%" height={120}>
-            <BarChart data={data} barSize={24} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={130}>
+            <BarChart data={data} barSize={28} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={DARK.border} vertical={false} />
               <XAxis dataKey="name" tick={{ fill: DARK.text, fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: DARK.text, fontSize: 10 }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: '#21262d' }} />
-              <Bar dataKey="value" radius={[2, 2, 0, 0]}>
+              <Bar dataKey="value" radius={[3, 3, 0, 0]}>
                 {data.map((_, i) => (
-                  <Cell key={i} fill={barColors[i % barColors.length]} />
+                  <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
                 ))}
               </Bar>
             </BarChart>
@@ -76,6 +65,18 @@ export default function ResourcesPanel({ state }) {
       }
     </div>
   )
+}
+
+export default function ResourcesPanel({ state }) {
+  const r = state?.resources
+  if (!r) return null
+
+  const weaponsData   = Object.entries(r.weapons        ?? {}).map(([k, v]) => ({ name: k, value: v }))
+  const euData        = Object.entries(r.exchange_units  ?? {}).map(([k, v]) => ({ name: k, value: v }))
+  const personnelData = Object.entries(r.personnel       ?? {}).map(([k, v]) => ({ name: k, value: v }))
+  const toolsData     = Object.entries(r.tools           ?? {}).map(([k, v]) => ({ name: k, value: v }))
+
+  const fuelMax = 100000
 
   return (
     <div className="space-y-4">
@@ -83,7 +84,9 @@ export default function ResourcesPanel({ state }) {
       <div className="bg-surface border border-border rounded p-3 space-y-2">
         <div className="text-xs text-text-dim uppercase tracking-wider">Fuel</div>
         <ResourceBar label="Fuel available" value={r.fuel} max={fuelMax} unit=" L" />
-        <div className="text-xs text-text-dim">4,000 L per sortie · {Math.floor(r.fuel / 4000)} sorties remaining</div>
+        <div className="text-xs text-text-dim">
+          4,000 L per sortie &middot; {Math.floor(r.fuel / 4000)} sorties remaining
+        </div>
       </div>
 
       {/* Spare parts */}
@@ -92,22 +95,10 @@ export default function ResourcesPanel({ state }) {
         <ResourceBar label="Generic spares" value={r.spare_parts} max={50} unit=" units" />
       </div>
 
-      {/* Charts */}
-      <ChartContainer title="Weapons Inventory" data={weaponsData} />
-      <ChartContainer title="Exchange Units (UE)" data={euData} />
-      <ChartContainer title="Personnel" data={personnelData} />
-
-      {/* Tools */}
-      {r.tools && Object.keys(r.tools).length > 0 && (
-        <div className="bg-surface border border-border rounded p-3">
-          <div className="text-xs text-text-dim uppercase tracking-wider mb-2">Tools</div>
-          <div className="space-y-1.5">
-            {Object.entries(r.tools).map(([k, v]) => (
-              <ResourceBar key={k} label={k} value={v} max={Math.max(v + 2, 5)} />
-            ))}
-          </div>
-        </div>
-      )}
+      <ChartCard title="Weapons Inventory" data={weaponsData} />
+      <ChartCard title="Exchange Units (UE)" data={euData} />
+      <ChartCard title="Personnel" data={personnelData} />
+      {toolsData.length > 0 && <ChartCard title="Tools" data={toolsData} />}
     </div>
   )
 }
