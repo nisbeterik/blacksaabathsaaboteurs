@@ -3,6 +3,16 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class ScoreEvent:
+    day: int
+    hour: int
+    delta: int          # positive = good, negative = bad
+    reason: str         # short label shown in UI
+    detail: str         # full explanation for debrief / LLM
+    category: str       # 'decision' | 'luck' | 'mixed'
+
+
+@dataclass
 class Aircraft:
     id: str                        # e.g. "GE01", "GF02"
     type: str                      # "GripenE", "GripenF", "GlobalEye"
@@ -15,6 +25,7 @@ class Aircraft:
     maintenance_eta: int | None = None  # hours until maintenance complete
     fault: str | None = None            # current fault description if any
     return_eta: int | None = None       # hours until aircraft returns to base (when status="returning")
+    # status can be: "green", "red", "grey", "on_mission", "returning", "written_off"
 
 
 @dataclass
@@ -37,6 +48,7 @@ class Mission:
     return_hour: int
     assigned_aircraft: list[str] = field(default_factory=list)
     description: str = ""
+    outcome: str | None = None     # "success" | "failure" | None (pending)
 
 
 @dataclass
@@ -63,3 +75,14 @@ class BaseState:
     ato: ATO
     maintenance_slots: list[MaintenanceSlot]
     event_log: list[str] = field(default_factory=list)
+
+    # Campaign / scoring
+    campaign_score: int = 1000
+    score_log: list[ScoreEvent] = field(default_factory=list)
+    campaign_over: bool = False
+    campaign_result: str | None = None       # "victory" | "defeat"
+    campaign_over_reason: str | None = None
+    aircraft_written_off: list[str] = field(default_factory=list)
+    missions_completed: int = 0
+    missions_total: int = 0
+    low_fleet_hours: int = 0                 # consecutive hours with < 3 operational aircraft
