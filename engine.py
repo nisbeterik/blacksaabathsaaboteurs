@@ -642,6 +642,17 @@ def advance_time(state: BaseState, hours: int) -> BaseState:
                 else:
                     _log(state, f"Mission {mission.id} departed unassigned — no green aircraft available")
 
+        # Decrement resupply ETA
+        if state.resupply_eta is not None:
+            state.resupply_eta -= 1
+            if state.resupply_eta <= 0:
+                state.resupply_eta = None
+                state.resources.fuel = min(100_000, state.resources.fuel + 30_000)
+                for k, add in [("Robot-1", 4), ("Bomb-2", 2), ("Robot-15", 1)]:
+                    if k in state.resources.weapons:
+                        state.resources.weapons[k] += add
+                _log(state, "Resupply convoy arrived — +30,000L fuel, +Robot-1×4, +Bomb-2×2, +Robot-15×1")
+
         # Decrement maintenance ETAs
         for ac in state.aircraft:
             if ac.status == "red" and ac.maintenance_eta is not None:
@@ -757,10 +768,38 @@ def generate_new_ato(state: BaseState) -> BaseState:
     return state
 
 
+def request_resupply(state: BaseState) -> BaseState:
+    """Request a resupply convoy. Arrives in 8h with +30kL fuel and weapons."""
+    if state.resupply_eta is not None:
+        raise ValueError(f"Resupply already en route — ETA {state.resupply_eta}h")
+    state.resupply_eta = 8
+    _log(state, "Resupply convoy dispatched — ETA 8h (+30,000L fuel, +Robot-1×4, +Bomb-2×2, +Robot-15×1)")
+    return state
+
+
+def apply_exchange_unit(state: BaseState, aircraft_id: str, ue_type: str) -> BaseState:
+    """Apply an Exchange Unit to reduce an aircraft's maintenance ETA by 4h."""
+    ac = _find_aircraft(state, aircraft_id)
+    if ac.status != "red":
+        raise ValueError(f"Cannot apply UE to {aircraft_id}: status is '{ac.status}' (must be in maintenance)")
+    if ac.maintenance_eta is None or ac.maintenance_eta <= 1:
+        raise ValueError(f"Cannot apply UE to {aircraft_id}: maintenance ETA too low ({ac.maintenance_eta}h)")
+    available = state.resources.exchange_units.get(ue_type, 0)
+    if available <= 0:
+        raise ValueError(f"No {ue_type} exchange units available")
+    state.resources.exchange_units[ue_type] = available - 1
+    old_eta = ac.maintenance_eta
+    ac.maintenance_eta = max(1, ac.maintenance_eta - 4)
+    _log(state, f"Applied {ue_type} UE to {aircraft_id} — maintenance ETA {old_eta}h → {ac.maintenance_eta}h")
+    return state
+
+
 def recall_aircraft(state: BaseState, aircraft_id: str) -> BaseState:
     """
-    Order an airborne aircraft to return to base early.
+    Order an airborne aircraft to return to base early (RTB).
     Sets status to 'returning' with a 1–2h transit ETA.
+    Marks the current mission as 'aborted' and scores a decision penalty.
+    The aircraft still undergoes post-mission check on landing.
     The aircraft lands automatically when advance_time decrements the ETA to 0.
     """
     ac = _find_aircraft(state, aircraft_id)
@@ -768,7 +807,19 @@ def recall_aircraft(state: BaseState, aircraft_id: str) -> BaseState:
         raise ValueError(f"Cannot recall {aircraft_id}: status is '{ac.status}' (must be on_mission)")
     ac.status = "returning"
     ac.return_eta = random.randint(1, 2)
-    _log(state, f"{aircraft_id} recalled — returning to base in {ac.return_eta}h")
+
+    # Mark mission aborted and score the penalty
+    for mission in state.ato.missions:
+        if aircraft_id in mission.assigned_aircraft:
+            mission.outcome = "aborted"
+            _score(
+                state, -20, f"RTB order — sortie aborted",
+                f"{aircraft_id} recalled from {mission.type} mission mid-sortie. Effectiveness lost.",
+                "decision",
+            )
+            break
+
+    _log(state, f"{aircraft_id} RTB ordered — returning in {ac.return_eta}h. Post-mission check will apply on landing.")
     return state
 
 
@@ -818,20 +869,23 @@ def return_from_mission(
     _score(state, +10, "Sortie completed", f"{aircraft_id} returned safely from sortie.", "luck")
     state.missions_total += 1
 
-    # Resolve mission outcome
+    # Resolve mission outcome — skip if sortie was aborted via RTB
     if mission_for_outcome:
-        phase = state.ato.phase
-        prob = _compute_success_prob(ac, mission_for_outcome, phase)
-        if random.random() < prob:
-            _log(state, f"{aircraft_id} {mission_for_outcome.type} sortie SUCCESSFUL ({int(prob*100)}% chance)")
-            _score(state, +20, "Sortie success", f"{aircraft_id} succeeded on {mission_for_outcome.type} sortie (p={int(prob*100)}%).", "luck")
-            state.missions_completed += 1
-            mission_for_outcome.outcome = "success"
+        if mission_for_outcome.outcome == "aborted":
+            _log(state, f"{aircraft_id} returned from aborted {mission_for_outcome.type} sortie — no effectiveness credited")
         else:
-            _log(state, f"{aircraft_id} {mission_for_outcome.type} sortie FAILED ({int((1-prob)*100)}% failure chance) — effectiveness degraded")
-            _score(state, -10, "Sortie failed", f"{aircraft_id} failed {mission_for_outcome.type} sortie (p={int(prob*100)}% success, rolled failure).", "luck")
-            mission_for_outcome.outcome = "failure"
-        mission.assigned_aircraft.remove(aircraft_id)
+            phase = state.ato.phase
+            prob = _compute_success_prob(ac, mission_for_outcome, phase)
+            if random.random() < prob:
+                _log(state, f"{aircraft_id} {mission_for_outcome.type} sortie SUCCESSFUL ({int(prob*100)}% chance)")
+                _score(state, +20, "Sortie success", f"{aircraft_id} succeeded on {mission_for_outcome.type} sortie (p={int(prob*100)}%).", "luck")
+                state.missions_completed += 1
+                mission_for_outcome.outcome = "success"
+            else:
+                _log(state, f"{aircraft_id} {mission_for_outcome.type} sortie FAILED ({int((1-prob)*100)}% failure chance) — effectiveness degraded")
+                _score(state, -10, "Sortie failed", f"{aircraft_id} failed {mission_for_outcome.type} sortie (p={int(prob*100)}% success, rolled failure).", "luck")
+                mission_for_outcome.outcome = "failure"
+        mission_for_outcome.assigned_aircraft.remove(aircraft_id)
     else:
         # Remove from any mission (fallback)
         for mission in state.ato.missions:
@@ -866,20 +920,24 @@ def return_from_mission(
 def generate_random_event(state: BaseState) -> BaseState:
     """Inject a random event into the current state."""
     green_aircraft = [ac for ac in state.aircraft if ac.status == "green"]
+
+    # Build phase-weighted event pool
+    event_types = ["bit_fault", "new_mission"]
+    if state.ato.phase in ("Kris", "Krig"):
+        event_types += ["qra_scramble", "qra_scramble"]  # 2× weight in wartime
     if not green_aircraft:
-        _log(state, "Random event: no green aircraft available for event")
+        event_types = [e for e in event_types if e != "bit_fault"]
+    if not event_types:
+        _log(state, "Random event: no eligible events available")
         return state
 
-    event_type = random.choice(["bit_fault", "resupply_delay", "new_mission", "weather"])
+    event_type = random.choice(event_types)
 
     if event_type == "bit_fault":
         ac = random.choice(green_aircraft)
         _log(state, f"RANDOM EVENT: BIT fault triggered on {ac.id}")
         trigger_fault(state, ac.id)
         _score(state, -5, "Random BIT fault", f"{ac.id} developed unexpected BIT fault — random mechanical failure.", "luck")
-
-    elif event_type == "resupply_delay":
-        _log(state, "RANDOM EVENT: Resupply convoy delayed — no fuel or weapons resupply for 8h")
 
     elif event_type == "new_mission":
         new_mission = Mission(
@@ -894,8 +952,16 @@ def generate_random_event(state: BaseState) -> BaseState:
         state.ato.missions.append(new_mission)
         _log(state, f"RANDOM EVENT: New unplanned mission {new_mission.id} ({new_mission.type}) added to ATO")
 
-    elif event_type == "weather":
-        _log(state, "RANDOM EVENT: Weather deterioration — all departures delayed 2h")
+    elif event_type == "qra_scramble":
+        qra_mission = next((m for m in state.ato.missions if m.type == "QRA"), None)
+        manned = qra_mission and len(qra_mission.assigned_aircraft) >= 2
+        if manned:
+            ac_str = ", ".join(qra_mission.assigned_aircraft)
+            _log(state, f"SCRAMBLE: Unidentified contacts detected. QRA ({ac_str}) launched — intercept successful.")
+            _score(state, +25, "QRA scramble — intercept", f"{ac_str} responded to scramble alert. Airspace defended.", "luck")
+        else:
+            _log(state, "SCRAMBLE: Unidentified contacts detected. QRA UNMANNED — airspace undefended!")
+            _score(state, -40, "QRA unmanned during scramble", "Scramble alert fired but no aircraft assigned to QRA. Undefended airspace.", "decision")
 
     return state
 
@@ -1035,6 +1101,7 @@ def serialize_state_json(state: BaseState) -> dict:
         "missions_completed": state.missions_completed,
         "missions_total": state.missions_total,
         "campaign_grade": _grade(state.campaign_score),
+        "resupply_eta": state.resupply_eta,
     }
 
 

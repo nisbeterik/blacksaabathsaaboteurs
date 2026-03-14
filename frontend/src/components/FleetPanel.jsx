@@ -153,32 +153,16 @@ function AircraftCard({ ac, mission, onAction }) {
 
       {/* Action buttons */}
       <div className="flex gap-1 pt-0.5">
-        {ac.status === 'green' && (
-          <button
-            onClick={() => {
-              if (window.confirm(`Trigger a random fault on ${ac.id}? This will put it into maintenance.`)) {
-                onAction('/api/action/trigger-fault', { aircraft_id: ac.id })
-              }
-            }}
-            className="flex-1 py-0.5 text-xs border border-col-red/40 text-col-red hover:bg-col-red/10 rounded transition-colors"
-          >
-            Trigger Fault
-          </button>
-        )}
-        {ac.status === 'red' && (
-          <button
-            onClick={() => onAction('/api/action/complete-maintenance', { aircraft_id: ac.id })}
-            className="flex-1 py-0.5 text-xs border border-col-green/40 text-col-green hover:bg-col-green/10 rounded transition-colors"
-          >
-            Complete Maint
-          </button>
-        )}
         {ac.status === 'on_mission' && (
           <button
-            onClick={() => onAction('/api/action/recall-aircraft', { aircraft_id: ac.id })}
+            onClick={() => {
+              if (window.confirm(`Order ${ac.id} to return to base?\n\n⚠ Consequence: sortie aborted (−20 pts), post-mission check still applies on landing.\n\nOnly RTB if you need this aircraft urgently for a higher-priority task.`)) {
+                onAction('/api/action/recall-aircraft', { aircraft_id: ac.id })
+              }
+            }}
             className="flex-1 py-0.5 text-xs border border-col-blue/40 text-col-blue hover:bg-col-blue/10 rounded transition-colors"
           >
-            RTB
+            RTB ⚠
           </button>
         )}
       </div>

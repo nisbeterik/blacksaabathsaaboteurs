@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 const QUICK_PROMPTS = [
-  'Which aircraft for the next DCA sortie?',
-  "What's our readiness for the next 48h?",
-  "GE05 failed BIT — complex LRU fault. What's the impact?",
-  'Should I use a Radar UE on GE05 or hold it in reserve?',
+  'Which aircraft should I assign to the next unassigned mission?',
+  "QRA isn't manned — what's the risk if I leave it empty?",
+  'Should I request a resupply convoy now or wait?',
+  'One of my aircraft is below 20h life — should I fly it or ground it?',
 ]
 
 function fmtTime(date) {
@@ -81,6 +81,37 @@ function BubbleTail() {
   )
 }
 
+// Render a single line with **bold** and *italic* segments
+function renderLine(line, key) {
+  const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g)
+  return (
+    <span key={key}>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**'))
+          return <strong key={i} className="font-semibold text-text-hi">{part.slice(2, -2)}</strong>
+        if (part.startsWith('*') && part.endsWith('*'))
+          return <em key={i} className="italic text-text-lo">{part.slice(1, -1)}</em>
+        return part
+      })}
+    </span>
+  )
+}
+
+// Render content with **bold** and newlines preserved
+function RichContent({ text }) {
+  const lines = text.split('\n')
+  return (
+    <div className="whitespace-pre-wrap">
+      {lines.map((line, i) => (
+        <span key={i}>
+          {renderLine(line, i)}
+          {i < lines.length - 1 && '\n'}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function Message({ msg }) {
   const isUser = msg.role === 'user'
 
@@ -88,7 +119,7 @@ function Message({ msg }) {
     return (
       <div className="flex flex-col items-end">
         <div className="max-w-[85%] rounded px-3 py-2 text-xs leading-relaxed bg-col-blue/20 border border-col-blue/40 text-text-hi">
-          <div className="whitespace-pre-wrap">{msg.content}</div>
+          <RichContent text={msg.content} />
         </div>
         {msg.time && <div className="text-xs text-text-dim mt-0.5 px-1">{fmtTime(msg.time)}</div>}
       </div>
@@ -102,7 +133,7 @@ function Message({ msg }) {
         <div className="relative max-w-[80%]">
           <BubbleTail />
           <div className="bg-raised border border-border rounded px-3 py-2 text-xs leading-relaxed text-text-hi">
-            <div className="whitespace-pre-wrap">{msg.content}</div>
+            <RichContent text={msg.content} />
           </div>
         </div>
       </div>
@@ -113,12 +144,10 @@ function Message({ msg }) {
 
 export default function ChatPanel({
   messages, input, loading, onInputChange, onSend, onClear,
-  scenarios = [], onRunScenario, actionLoading = false,
 }) {
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const [showScript, setShowScript] = useState(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -143,11 +172,6 @@ export default function ChatPanel({
     setShowSuggestions(false)
   }
 
-  const loadScenario = (label) => {
-    setShowScript(false)
-    onRunScenario(label)
-  }
-
   return (
     <div className="flex flex-col h-full relative">
 
@@ -158,21 +182,8 @@ export default function ChatPanel({
           <span className="text-xs font-bold tracking-wider uppercase text-text-hi">AI Assistant</span>
         </div>
         <div className="flex items-center gap-1">
-          {scenarios.length > 0 && (
-            <button
-              onClick={() => { setShowScript(s => !s); setShowSuggestions(false) }}
-              title="Demo script — pre-scripted steps that load a situation and pre-fill the chat. ⚡ steps also trigger a state event."
-              className={`text-xs px-2 py-0.5 rounded border transition-colors
-                ${showScript
-                  ? 'border-col-amber/50 text-col-amber bg-col-amber/10'
-                  : 'border-transparent text-text-dim hover:text-text-lo hover:bg-raised'
-                }`}
-            >
-              Script
-            </button>
-          )}
           <button
-            onClick={() => { setShowSuggestions(s => !s); setShowScript(false) }}
+            onClick={() => setShowSuggestions(s => !s)}
             className={`text-xs px-2 py-0.5 rounded border transition-colors
               ${showSuggestions
                 ? 'border-col-blue/50 text-col-blue bg-col-blue/10'
@@ -189,30 +200,6 @@ export default function ChatPanel({
           </button>
         </div>
       </div>
-
-      {/* Demo script dropdown */}
-      {showScript && (
-        <div className="absolute top-10 left-0 right-0 z-10 bg-raised border-b border-border p-2 space-y-1 shadow-lg max-h-72 overflow-y-auto">
-          <div className="text-xs text-text-dim uppercase tracking-wider px-1 pb-1">
-            Demo Script — click a step to load
-          </div>
-          {scenarios.map((s, i) => (
-            <button
-              key={s.label}
-              onClick={() => loadScenario(s.label)}
-              disabled={actionLoading}
-              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-surface border border-transparent
-                hover:border-border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <span className="text-text-dim mr-1.5 font-mono">{String(i + 1).padStart(2, '0')}.</span>
-              <span className="text-text-hi">{s.label}</span>
-              {s.has_event && (
-                <span className="ml-1.5 text-col-amber" title="Triggers a state mutation">⚡</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Quick suggestions dropdown */}
       {showSuggestions && (

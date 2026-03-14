@@ -86,3 +86,4 @@ class BaseState:
     missions_completed: int = 0
     missions_total: int = 0
     low_fleet_hours: int = 0                 # consecutive hours with < 3 operational aircraft
+    resupply_eta: int | None = None          # hours until resupply convoy arrives; None if not requested

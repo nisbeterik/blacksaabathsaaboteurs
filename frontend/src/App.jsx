@@ -18,7 +18,6 @@ const PHASE_DESC = {
   Krig: 'War — full combat ops, minimal margin for error',
 }
 
-const PHASE_CYCLE = ['Fred', 'Kris', 'Krig']
 const PHASE_COLORS = {
   Fred: 'text-col-green border-col-green/40',
   Kris: 'text-col-amber border-col-amber/40',
@@ -26,12 +25,11 @@ const PHASE_COLORS = {
 }
 
 const AUTOPLAY_SPEEDS = [
-  { key: 'x1',  label: '×1 Slow',   ms: 60000, tip: '1 game-hour per minute — relaxed pace' },
-  { key: 'x2',  label: '×2 Normal', ms: 30000, tip: '1 game-hour every 30s — standard ops tempo' },
-  { key: 'x4',  label: '×4 Fast',   ms: 15000, tip: '1 game-hour every 15s — accelerated planning' },
-  { key: 'x15', label: '×15 Blitz', ms:  4000, tip: '1 game-hour every 4s — rapid skip-ahead' },
+  { key: 'normal', label: 'Normal', ms: 4000, tip: '1 game-hour every 4s — standard ops tempo' },
+  { key: 'fast',   label: 'Fast',   ms: 1000, tip: '1 game-hour per second — rapid time advance' },
 ]
-const AUTOPLAY_RANDOM_CHANCE = 0.04
+// Event probability scales with operational phase — more chaos in wartime
+const AUTOPLAY_RANDOM_CHANCE = { Fred: 0.02, Kris: 0.04, Krig: 0.06 }
 
 function isCritical(prev, next) {
   if (!prev || !next) return false
@@ -47,7 +45,8 @@ function isCritical(prev, next) {
     prev.current_hour < m.departure_hour &&
     next.current_hour >= m.departure_hour
   )
-  return newFault || lifeDrop || dayRollover || missedDeparture
+  const newWriteOff = (next.aircraft_written_off?.length ?? 0) > (prev.aircraft_written_off?.length ?? 0)
+  return newFault || lifeDrop || dayRollover || missedDeparture || newWriteOff
 }
 
 async function apiFetch(path, options = {}) {
@@ -73,10 +72,8 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [backendError, setBackendError] = useState(false)
   const [tooltipsEnabled, setTooltipsEnabled] = useState(true)
-  const [demoScenarios, setDemoScenarios] = useState([])
   const [autoplay, setAutoplay] = useState(false)
   const [autoplaySpeedIdx, setAutoplaySpeedIdx] = useState(0)
-  const [autoplayRandomEvents, setAutoplayRandomEvents] = useState(false)
   const pollRef = useRef(null)
   const autoplayRef = useRef(null)
   const prevStateRef = useRef(null)
@@ -117,11 +114,6 @@ export default function App() {
     }
   }, [fetchState])
 
-  // Fetch demo script once on mount
-  useEffect(() => {
-    apiFetch('/api/demo/scenarios').then(setDemoScenarios).catch(() => {})
-  }, [])
-
   // Keep the autoplay tick fn fresh so it always closes over latest state
   useEffect(() => {
     autoplayTickFnRef.current = async () => {
@@ -135,7 +127,8 @@ export default function App() {
         })
         setState(next)
         let checkState = next
-        if (autoplayRandomEvents && Math.random() < AUTOPLAY_RANDOM_CHANCE) {
+        const eventChance = AUTOPLAY_RANDOM_CHANCE[next.phase] ?? 0.04
+        if (Math.random() < eventChance) {
           const withEvent = await apiFetch('/api/action/random-event', { method: 'POST' })
           setState(withEvent)
           const lastEvent = withEvent.event_log?.[withEvent.event_log.length - 1]
@@ -158,7 +151,7 @@ export default function App() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoplayRandomEvents, actionLoading])
+  }, [actionLoading])
 
   // Start/stop autoplay interval when play state or speed changes
   useEffect(() => {
@@ -222,23 +215,6 @@ export default function App() {
     setMessages([])
   }
 
-  // Run a demo script step: apply event trigger on backend, update state, pre-fill chat input
-  const runDemoStep = async (label) => {
-    setActionLoading(true)
-    try {
-      const data = await apiFetch('/api/demo/run', {
-        method: 'POST',
-        body: JSON.stringify({ label }),
-      })
-      setState(data.state)
-      setChatInput(data.question)
-    } catch (e) {
-      showToast(e.message, 'error')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   const ready     = state?.aircraft?.filter(a => a.status === 'green').length ?? 0
   const onMission = state?.aircraft?.filter(a => a.status === 'on_mission').length ?? 0
   const inMaint   = state?.aircraft?.filter(a => a.status === 'red').length ?? 0
@@ -269,19 +245,12 @@ export default function App() {
                 Day {state.current_day} &middot; {String(state.current_hour).padStart(2, '0')}:00
               </span>
               <span className="text-text-dim">|</span>
-              <button
-                onClick={() => {
-                  const next = PHASE_CYCLE[(PHASE_CYCLE.indexOf(state.phase) + 1) % 3]
-                  runAction('/api/action/set-phase', { phase: next })
-                }}
-                disabled={actionLoading}
-                title={`${PHASE_DESC[state.phase] ?? ''} — click to escalate`}
-                className={`uppercase tracking-widest font-bold border-b border-dashed transition-colors
-                  hover:opacity-70 disabled:opacity-40 cursor-pointer
-                  ${PHASE_COLORS[state.phase] ?? 'text-col-amber border-col-amber/40'}`}
+              <span
+                title={PHASE_DESC[state.phase] ?? ''}
+                className={`uppercase tracking-widest font-bold ${PHASE_COLORS[state.phase]?.split(' ')[0] ?? 'text-col-amber'}`}
               >
                 {state.phase}
-              </button>
+              </span>
               <span className="text-text-dim">|</span>
               <button
                 onClick={() => setTooltipsEnabled(v => !v)}
@@ -382,7 +351,14 @@ export default function App() {
                 onAssign={(mid, aids) => runAction('/api/action/assign-aircraft', { mission_id: mid, aircraft_ids: aids })}
               />
             )}
-            {state && activeTab === 'Resources' && <ResourcesPanel state={state} />}
+            {state && activeTab === 'Resources' && (
+              <ResourcesPanel
+                state={state}
+                onRequestResupply={() => runAction('/api/action/request-resupply')}
+                onApplyUE={(aircraft_id, ue_type) => runAction('/api/action/apply-exchange-unit', { aircraft_id, ue_type })}
+                loading={actionLoading}
+              />
+            )}
             {state && activeTab === 'Score'     && <ScorePanel state={state} />}
           </div>
 
@@ -401,9 +377,6 @@ export default function App() {
             onInputChange={setChatInput}
             onSend={sendChat}
             onClear={clearChat}
-            scenarios={demoScenarios}
-            onRunScenario={runDemoStep}
-            actionLoading={actionLoading}
           />
         </div>
       </div>
@@ -413,15 +386,11 @@ export default function App() {
         <ControlBar
           onAction={runAction}
           loading={actionLoading}
-          scenarios={[demoScenarios[0], demoScenarios[2], demoScenarios[3]].filter(Boolean)}
-          onRunScenario={runDemoStep}
           autoplay={autoplay}
           onToggleAutoplay={() => setAutoplay(v => !v)}
           autoplaySpeedIdx={autoplaySpeedIdx}
           onCycleSpeed={() => setAutoplaySpeedIdx(i => (i + 1) % AUTOPLAY_SPEEDS.length)}
           autoplaySpeeds={AUTOPLAY_SPEEDS}
-          autoplayRandomEvents={autoplayRandomEvents}
-          onToggleRandomEvents={() => setAutoplayRandomEvents(v => !v)}
         />
       </div>
 

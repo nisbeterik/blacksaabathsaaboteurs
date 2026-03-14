@@ -94,8 +94,18 @@ export default function MissionsPanel({ state, onAssign }) {
     }
   }, [selectedMission])
 
-  const greenAircraft      = aircraft.filter(a => a.status === 'green')
   const selectedMissionObj = missions.find(m => m.id === selectedMission)
+  const currentHour = state?.current_hour ?? 0
+
+  // Green aircraft + returning aircraft that will be back before this mission departs
+  const greenAircraft = aircraft.filter(a => a.status === 'green')
+  const returningAssignable = aircraft.filter(a =>
+    a.status === 'returning' &&
+    a.return_eta != null &&
+    selectedMissionObj &&
+    currentHour + a.return_eta < selectedMissionObj.departure_hour
+  )
+  const assignableAircraft = [...greenAircraft, ...returningAssignable]
 
   const handleAssign = async () => {
     if (!selectedMission || selectedAircraft.length === 0) return
@@ -125,7 +135,7 @@ export default function MissionsPanel({ state, onAssign }) {
   }
 
   const hasMismatch = selectedAircraft.some(id => {
-    const ac = greenAircraft.find(a => a.id === id)
+    const ac = assignableAircraft.find(a => a.id === id)
     return ac && selectedMissionObj && ac.configuration !== selectedMissionObj.required_config
   })
 
@@ -177,43 +187,49 @@ export default function MissionsPanel({ state, onAssign }) {
           ATO Timeline — Day {state?.ato?.day} ({state?.ato?.phase})
         </div>
 
-        {/* Hour ruler — absolutely positioned for accurate alignment with bars */}
-        <div className="flex mb-2">
+        {/* Hour ruler with gridlines */}
+        <div className="flex mb-1">
           <div className="w-20 flex-shrink-0" />
           <div className="flex-1 relative h-4">
-            {[0, 6, 12, 18, 24].map(h => (
+            {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map(h => (
               <span
                 key={h}
-                className="absolute text-xs text-text-dim select-none"
+                className="absolute text-[10px] text-text-dim select-none"
                 style={{ left: `${(h / 24) * 100}%`, transform: 'translateX(-50%)' }}
               >
-                {pad(h)}
+                {h % 4 === 0 ? pad(h) : '·'}
               </span>
             ))}
           </div>
         </div>
 
         {/* Mission bars */}
-        {missions.map(m => {
+        {[...missions].sort((a, b) => a.departure_hour - b.departure_hour).map(m => {
           const start      = (m.departure_hour / 24) * 100
           const duration   = m.return_hour > m.departure_hour
             ? m.return_hour - m.departure_hour
             : 24 - m.departure_hour + m.return_hour
-          const width      = Math.max(2, (duration / 24) * 100)
+          const width      = Math.max(1.5, (duration / 24) * 100)
           const assigned   = m.assigned_aircraft ?? []
+          const full       = assigned.length >= m.required_aircraft
           const unassigned = assigned.length === 0
-          const barColor   = unassigned ? '#f85149' : (TYPE_BG[m.type] ?? '#484f58')
+          const barColor   = unassigned ? '#f85149' : full ? (TYPE_BG[m.type] ?? '#484f58') : '#d29922'
 
           return (
-            <div key={m.id} className="flex items-center mb-1.5">
+            <div key={m.id} className="flex items-center mb-1">
               <div className="w-20 flex-shrink-0 text-xs flex items-center gap-1">
-                <span className="text-text-lo">{m.id}</span>
-                <span className={`font-bold ${TYPE_COLOR[m.type] ?? 'text-text-lo'}`}>{m.type}</span>
+                <span className="text-text-dim">{m.id}</span>
+                <span className={`font-bold text-[10px] ${TYPE_COLOR[m.type] ?? 'text-text-lo'}`}>{m.type}</span>
               </div>
-              <div className="flex-1 h-5 bg-raised rounded relative">
+              <div className="flex-1 h-5 bg-raised rounded relative overflow-hidden">
+                {/* Subtle 4h gridlines */}
+                {[4, 8, 12, 16, 20].map(h => (
+                  <div key={h} className="absolute top-0 bottom-0 w-px bg-border opacity-40"
+                    style={{ left: `${(h / 24) * 100}%` }} />
+                ))}
                 <div
                   onClick={() => { setSelectedMission(m.id); setSelectedAircraft([]) }}
-                  className="absolute h-full rounded flex items-center px-1.5 text-xs font-semibold text-white overflow-hidden whitespace-nowrap cursor-pointer hover:brightness-125 transition-[filter]"
+                  className="absolute h-full rounded flex items-center px-1.5 text-[10px] font-semibold text-white overflow-hidden whitespace-nowrap cursor-pointer hover:brightness-125 transition-[filter]"
                   style={{
                     left: `${start}%`,
                     width: `${width}%`,
@@ -223,7 +239,7 @@ export default function MissionsPanel({ state, onAssign }) {
                     outlineOffset: '1px',
                   }}
                 >
-                  {unassigned ? 'UNASSIGNED' : assigned.join(' ')}
+                  {unassigned ? '?' : assigned.join('+')}
                 </div>
               </div>
             </div>
@@ -232,11 +248,13 @@ export default function MissionsPanel({ state, onAssign }) {
 
         {/* Current time marker */}
         {state && (
-          <div className="flex items-center mt-1">
-            <div className="w-20 flex-shrink-0 text-xs text-col-amber font-semibold">Now</div>
-            <div className="flex-1 h-5 relative">
+          <div className="flex items-center mt-0.5">
+            <div className="w-20 flex-shrink-0 text-[10px] text-col-amber font-semibold">
+              {pad(state.current_hour)}:00
+            </div>
+            <div className="flex-1 h-4 relative">
               <div
-                className="absolute top-0 bottom-0 w-0.5 bg-col-amber opacity-80"
+                className="absolute top-0 bottom-0 w-0.5 bg-col-amber opacity-90"
                 style={{ left: `${(state.current_hour / 24) * 100}%` }}
               />
             </div>
@@ -284,29 +302,37 @@ export default function MissionsPanel({ state, onAssign }) {
         )}
 
         <div>
-          <label className="text-xs text-text-lo mb-1 block">Aircraft (ready only)</label>
+          <label className="text-xs text-text-lo mb-1 block">Aircraft (ready or returning in time)</label>
           <div className="flex flex-wrap gap-1.5">
-            {greenAircraft.length === 0 && (
-              <span className="text-xs text-text-dim">No ready aircraft available</span>
+            {assignableAircraft.length === 0 && (
+              <span className="text-xs text-text-dim">No available aircraft</span>
             )}
-            {greenAircraft.map(ac => {
+            {assignableAircraft.map(ac => {
               const mismatch = selectedMissionObj && ac.configuration !== selectedMissionObj.required_config
               const selected = selectedAircraft.includes(ac.id)
+              const isReturning = ac.status === 'returning'
               return (
                 <button
                   key={ac.id}
                   onClick={() => toggleAircraft(ac.id)}
-                  title={mismatch ? `Config mismatch: ${ac.configuration} ≠ ${selectedMissionObj.required_config}` : ac.configuration}
+                  title={mismatch
+                    ? `Config mismatch: ${ac.configuration} ≠ ${selectedMissionObj.required_config}`
+                    : isReturning ? `Returning in ${ac.return_eta}h — will be ready before departure` : ac.configuration}
                   className={`px-2 py-0.5 rounded text-xs font-semibold border transition-colors
                     ${selected
                       ? 'bg-col-blue/20 border-col-blue text-col-blue'
                       : mismatch
                         ? 'bg-raised border-col-amber/40 text-col-amber hover:border-col-amber'
-                        : 'bg-raised border-border text-text-lo hover:border-col-blue/50 hover:text-text-hi'
+                        : isReturning
+                          ? 'bg-raised border-col-cyan/40 text-col-cyan hover:border-col-cyan'
+                          : 'bg-raised border-border text-text-lo hover:border-col-blue/50 hover:text-text-hi'
                     }`}
                 >
                   {ac.id}
-                  <span className="ml-1 opacity-60">{ac.configuration}</span>
+                  {isReturning
+                    ? <span className="ml-1 opacity-70">RTB+{ac.return_eta}h</span>
+                    : <span className="ml-1 opacity-60">{ac.configuration}</span>
+                  }
                   {mismatch && <span className="ml-1">⚠</span>}
                 </button>
               )

@@ -119,9 +119,9 @@ def serialize_state(state: BaseState) -> str:
         lines.append(f"  Personnel: {pers_str}")
     lines.append("")
 
-    # ATO
+    # ATO — sorted by departure_hour (chronological order)
     lines.append(f"--- ATO — Day {state.ato.day} ({state.ato.phase}) ---")
-    for m in state.ato.missions:
+    for m in sorted(state.ato.missions, key=lambda m: m.departure_hour):
         lines.append(_fmt_mission(m))
     lines.append("")
 
@@ -160,6 +160,11 @@ LIFE THRESHOLDS (hard rules):
 - remaining_life ≤ 20h: GROUNDED — must not fly. Aircraft will be WRITTEN OFF if flown and life hits 0.
 - remaining_life ≤ 50h: CAUTION — prefer alternatives; flag risk if used
 - remaining_life > 100h: PREFERRED — prioritize to keep wear distribution even
+
+ASSIGNMENT RULES (hard constraints):
+- Always discuss missions in chronological order of departure_hour (earliest departure first)
+- NEVER recommend the same aircraft ID for two slots on the same mission — each slot requires a DIFFERENT aircraft
+- "Returning" aircraft can be pre-assigned to a future mission only if their return_eta + current_hour < mission departure_hour
 
 TRADE-OFF REASONING (critical):
 When the player asks for a recommendation, always:

@@ -95,6 +95,8 @@ Starting score: **1000**. Tracked throughout the campaign. Determines final grad
 | Day ends with ≥ 6 operational aircraft | +15 | — | Daily bonus |
 | BIT/post-mission fault (random) | -5 | **luck** | Not the player's fault |
 | Random event fault | -5 | **luck** | Not the player's fault |
+| QRA scramble — manned | +25 | luck | Intercept success |
+| QRA scramble — unmanned | -40 | **decision** | Player chose not to man QRA |
 
 ### Commander Grades
 
@@ -134,17 +136,66 @@ These are the core decisions the player must navigate:
 
 ---
 
+## QRA Scramble Events
+
+QRA (Quick Reaction Alert) is a standing mission that appears on every Kris/Krig ATO.
+It requires 2 × DCA/CAP aircraft on standby 24h.
+
+**The trade-off**: those 2 aircraft could fly offensive sorties instead.
+**The consequence**: when a scramble event fires (random, 2× weighted in Krig phase):
+
+| QRA status | Outcome | Score |
+|---|---|---|
+| 2+ aircraft assigned | Intercept success — "Airspace defended" | +25 (luck) |
+| Unassigned / undermanned | Scramble missed — "Airspace undefended" | -40 (decision) |
+
+Scramble events pause autoplay so the player sees what happened. Assigning to QRA is a real
+strategic decision — you're sacrificing offensive capability for defensive coverage.
+
+---
+
+## Resource Management
+
+### Fuel
+- Each sortie costs 4,000L per aircraft.
+- Tank capacity: 100,000L. Starting stock: 80,000L.
+- Fuel never replenishes automatically. The player must **request a resupply convoy**.
+
+### Resupply Convoy
+- Triggered manually in the Resources tab: "Request Resupply (8h)"
+- Arrives 8 game-hours after request: +30,000L fuel, +4 Robot-1, +2 Bomb-2, +1 Robot-15
+- Only one convoy at a time. Must wait for the current one to arrive before requesting another.
+- **Trade-off**: convoys can be ambushed (future event), and diverting logistics costs time.
+
+### Exchange Units (UE)
+Exchange Units are spare subsystems (Radar, EjectionSeat, HydraulicPump, SignalProcessor).
+They are applied in the Resources tab to **reduce a specific aircraft's maintenance ETA by 4h**.
+
+- Must have at least 1 of the UE type in stock.
+- Target aircraft must be in maintenance (status: red) with ETA > 1h.
+- UE is consumed (count decrements by 1).
+- **Trade-off**: using a UE now may leave you short when a worse fault strikes tomorrow.
+
+### Weapons
+Weapons deplete each time an aircraft returns from an armed sortie (random fraction consumed).
+Resupply convoy replenishes Robot-1, Bomb-2, Robot-15.
+
+---
+
 ## Event System
 
 Events fire from several sources:
 
 | Source | Trigger | Example |
 |--------|---------|---------|
-| Autoplay tick | 4% chance per game-hour | BIT fault, weather, resupply delay |
-| Manual | Player clicks "Random Event" | Immediate injection |
+| Autoplay (Events ON) | 4% chance per game-hour | BIT fault, new mission, QRA scramble |
 | Campaign arc | Day rollover | Phase escalation on day 3, day 5 |
-| Mission outcome | Sortie failure | Narrative consequence logged |
-| Post-mission roll | Aircraft returns | Fault trigger (33% base chance) |
+| Mission outcome | Sortie completes | Success/failure roll logged |
+| Post-mission roll | Aircraft returns | Fault trigger (~33% base chance) |
+
+**Note**: "Random Event" manual button and demo scenario scripts are removed from the
+production build — events happen organically through autoplay. This preserves game tension
+and prevents players from gaming the system.
 
 ---
 
@@ -171,3 +222,9 @@ The AI can be asked "what went wrong?" and will analyse the score log.
 | Post-mission fault chance | ~33% |
 | Fuel per sortie | 4,000 L |
 | Aircraft life thresholds | 20h grounded / 50h caution / 100h preferred |
+| Resupply convoy delay | 8 game-hours |
+| Resupply fuel delivery | +30,000 L |
+| Resupply weapons delivery | +4 Robot-1, +2 Bomb-2, +1 Robot-15 |
+| UE maintenance reduction | -4h per unit applied (min 1h remaining) |
+| QRA scramble score (manned) | +25 |
+| QRA scramble score (unmanned) | -40 (decision) |
