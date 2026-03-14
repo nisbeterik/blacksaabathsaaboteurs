@@ -1,0 +1,173 @@
+# SAAB Base Commander — Game Design
+
+## Vision
+
+A single-player roguelike-strategy simulator of a Swedish Air Force dispersed road base
+(vägbas). The player acts as Base Battalion Commander (BC), making decisions about aircraft
+allocation, maintenance prioritisation, and resource management across a 7-day crisis
+escalation campaign.
+
+The AI assistant (LLM) is a key tool: it analyses situations, identifies options, and
+argues trade-offs. There is rarely a "right" answer — only choices with different risks
+and consequences. The AI helps the player reason, not replace their judgement.
+
+---
+
+## Campaign Arc (7 Days)
+
+The campaign escalates automatically. The player cannot prevent escalation — they can only
+manage its consequences.
+
+| Days | Phase | Flavour |
+|------|-------|---------|
+| 1–2  | Fred  | Peacetime — limited missions, learning the systems, low pressure |
+| 3–4  | Kris  | Crisis — elevated readiness, restricted logistics, more ATO missions |
+| 5–7  | Krig  | War — full combat ops, hard mission quotas, constant attrition |
+
+Phase escalation fires as a narrative event when the day rolls over:
+- Day 3 start: "Intelligence confirms threat escalation. Phase: Fred → Kris."
+- Day 5 start: "Hostilities confirmed. Phase: Kris → Krig."
+
+---
+
+## Game End
+
+### Win: Survive all 7 days
+Campaign ends when Day 8 begins. Final score determines the commander grade.
+
+### Defeat: Fail state triggered mid-campaign
+Any of the following ends the campaign immediately:
+
+| Fail State | Threshold | Attribution |
+|------------|-----------|-------------|
+| Fleet collapse | Fewer than 3 operational aircraft (green + airborne + returning) | Mixed |
+| Score collapse | Campaign score drops below 400 | Decision |
+| Strategic defeat | 4 or more aircraft written off | Mixed |
+
+---
+
+## Aircraft Written Off
+
+When an aircraft's `remaining_life` reaches 0, it is **permanently written off** (status:
+`written_off`). It cannot return to service. A GripenE lost is a major strategic loss.
+
+This makes life management genuinely consequential — sending GE08 (20h remaining) on
+another sortie is gambling an aircraft worth hundreds of millions of SEK.
+
+---
+
+## Mission Resolution
+
+When an aircraft completes a sortie, a success roll determines the outcome:
+
+```
+base_success = {DCA: 75%, RECCE: 85%, AI/ST: 70%, QRA: 90%, AEW: 80%}
+config_match  = +10% if configuration matches required_config
+config_miss   = -15% if configuration does not match
+life > 100h   = +5%
+life 50–100h  = 0%
+life 20–50h   = -15%
+life < 20h    = -30% (should be grounded — player fault if sent)
+phase Kris    = -5%
+phase Krig    = -15%
+```
+
+Outcome is logged in the event log. Failed sorties lose points and may generate
+narrative consequences (enemy breach, mission regenerated on next ATO).
+
+---
+
+## Campaign Score
+
+Starting score: **1000**. Tracked throughout the campaign. Determines final grade.
+
+### Score events
+
+| Event | Delta | Category | Detail logged |
+|-------|-------|----------|---------------|
+| Sortie completed (aircraft returns) | +10 | — | Always |
+| Sortie success (outcome roll) | +20 | luck | Narrative outcome in log |
+| Sortie failure (outcome roll) | -10 | luck | Outcome in log |
+| Missed departure (mission left unassigned) | -30 | **decision** | How many green aircraft were available |
+| Wrong config assigned when correct was available | -15 | **decision** | Which correct-config aircraft was idle |
+| Aircraft life ≤ 20h sent on mission | -20 | **decision** | Player chose to fly a grounded-threshold aircraft |
+| Aircraft written off | -50 | mixed | Aircraft ID |
+| Day ends with ≥ 6 operational aircraft | +15 | — | Daily bonus |
+| BIT/post-mission fault (random) | -5 | **luck** | Not the player's fault |
+| Random event fault | -5 | **luck** | Not the player's fault |
+
+### Commander Grades
+
+| Score | Grade |
+|-------|-------|
+| 900–1000+ | **Gold — Outstanding** |
+| 750–899   | **Silver — Commended** |
+| 600–749   | **Bronze — Satisfactory** |
+| 400–599   | **Marginal — Needs Improvement** |
+| < 400     | **Busted — Campaign Failed** (immediate defeat) |
+
+---
+
+## AI Assistant — Trade-off Reasoning
+
+The LLM is a co-pilot, not an oracle. It should:
+
+1. **Enumerate options** — present 2–3 realistic choices, not just one recommendation
+2. **Assign rough probabilities** — "using GE08 gives ~45% success; waiting 2h for GE03 gives 74%"
+3. **Argue the trade-off** — what you gain vs what you risk for each option
+4. **Flag attribution** — "if you choose X and it fails, that's an acceptable risk; if you choose Y and it fails, you took an avoidable gamble"
+
+The score log (last 10 events) is injected into the LLM context so the assistant can
+explain why the score changed and what the player could have done differently.
+
+---
+
+## Decision Points (Trade-offs)
+
+These are the core decisions the player must navigate:
+
+- **Which aircraft to assign?** High life vs available config vs fleet balance
+- **Use UE now or save it?** Mission urgency vs strategic reserve
+- **Send GE08 or wait?** Partial coverage now vs full coverage later (written-off risk)
+- **Scrub a mission or fly under-strength?** Score hit now vs risk of failure later
+- **Prioritise maintenance or fly?** More sorties now vs fleet health tomorrow
+
+---
+
+## Event System
+
+Events fire from several sources:
+
+| Source | Trigger | Example |
+|--------|---------|---------|
+| Autoplay tick | 4% chance per game-hour | BIT fault, weather, resupply delay |
+| Manual | Player clicks "Random Event" | Immediate injection |
+| Campaign arc | Day rollover | Phase escalation on day 3, day 5 |
+| Mission outcome | Sortie failure | Narrative consequence logged |
+| Post-mission roll | Aircraft returns | Fault trigger (33% base chance) |
+
+---
+
+## Roguelike Loop
+
+Each **Reset** starts a new campaign run (Day 1, Fred phase, fresh fleet).
+The run ends in **victory** (Day 7 survived) or **defeat** (fail state).
+
+The debrief screen shows what happened and why — helping the player learn from each run.
+The AI can be asked "what went wrong?" and will analyse the score log.
+
+---
+
+## Key Numbers
+
+| Constant | Value |
+|----------|-------|
+| Campaign length | 7 days |
+| Starting score | 1000 |
+| Defeat threshold | < 400 |
+| Written-off defeat | ≥ 4 aircraft |
+| Fleet collapse threshold | < 3 operational |
+| Random event chance | 4% per autoplay game-hour |
+| Post-mission fault chance | ~33% |
+| Fuel per sortie | 4,000 L |
+| Aircraft life thresholds | 20h grounded / 50h caution / 100h preferred |
