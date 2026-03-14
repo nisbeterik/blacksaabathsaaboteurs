@@ -125,12 +125,10 @@ def create_initial_state() -> BaseState:
             location="flight_line",
         ),
         Aircraft(
-            id="GE06", type="GripenE", status="red",
+            id="GE06", type="GripenE", status="green",
             remaining_life=48, total_flight_hours=252,
-            configuration="DCA/CAP", current_payload=[],
-            location="service_bay",
-            maintenance_eta=4,
-            fault="Quick LRU replacement (AU Steg 2/3)",
+            configuration="DCA/CAP", current_payload=["Robot-1"],
+            location="flight_line",
         ),
         Aircraft(
             id="GE07", type="GripenE", status="green",
@@ -151,10 +149,10 @@ def create_initial_state() -> BaseState:
             location="flight_line",
         ),
         Aircraft(
-            id="GF02", type="GripenF", status="on_mission",
+            id="GF02", type="GripenF", status="green",
             remaining_life=95, total_flight_hours=105,
             configuration="DCA/CAP", current_payload=["Robot-1", "Robot-1"],
-            location="on_mission",
+            location="flight_line",
         ),
     ]
 
@@ -221,7 +219,7 @@ def create_initial_state() -> BaseState:
     maintenance_slots = [
         MaintenanceSlot(
             id="service_bay", type="service_bay", capacity=2,
-            current_occupants=["GE06"],
+            current_occupants=[],
         ),
         MaintenanceSlot(
             id="minor_workshop", type="minor_workshop", capacity=1,
@@ -240,7 +238,7 @@ def create_initial_state() -> BaseState:
         resources=resources,
         ato=ato,
         maintenance_slots=maintenance_slots,
-        event_log=["[Day 1 08:00] Campaign started. Day 1 Fred ATO loaded. GE06 in service bay (4h ETA). Survive 7 days."],
+        event_log=["[Day 1 08:00] Campaign started. Day 1 Fred ATO loaded. All 10 aircraft ready. Survive 3 days."],
     )
 
 
@@ -291,6 +289,11 @@ def _find_aircraft(state: BaseState, aircraft_id: str) -> Aircraft:
         if ac.id == aircraft_id:
             return ac
     raise ValueError(f"Aircraft '{aircraft_id}' not found in state")
+
+
+def _find_aircraft_safe(state: BaseState, aircraft_id: str) -> Aircraft | None:
+    """Like _find_aircraft but returns None instead of raising if not found."""
+    return next((ac for ac in state.aircraft if ac.id == aircraft_id), None)
 
 
 def _find_mission(state: BaseState, mission_id: str) -> Mission:
@@ -365,17 +368,17 @@ def _check_fail_states(state: BaseState) -> None:
     if state.campaign_over:
         return
 
-    # Campaign complete — survived all 7 days
-    if state.current_day > 7:
+    # Campaign complete — survived all 3 days
+    if state.current_day > 3:
         state.campaign_over = True
         grade = _grade(state.campaign_score)
         state.campaign_result = "victory"
-        state.campaign_over_reason = f"7-day campaign survived. Final score: {state.campaign_score} — {grade}"
+        state.campaign_over_reason = f"3-day campaign survived. Final score: {state.campaign_score} — {grade}"
         _log(state, f"CAMPAIGN COMPLETE — Victory! Score: {state.campaign_score} ({grade})")
         return
 
     # Score collapse
-    if state.campaign_score < 400:
+    if state.campaign_score < 600:
         state.campaign_over = True
         state.campaign_result = "defeat"
         state.campaign_over_reason = f"Score collapsed to {state.campaign_score} — too many avoidable losses."
@@ -383,7 +386,7 @@ def _check_fail_states(state: BaseState) -> None:
         return
 
     # Strategic defeat — too many aircraft written off
-    if len(state.aircraft_written_off) >= 4:
+    if len(state.aircraft_written_off) >= 3:
         state.campaign_over = True
         state.campaign_result = "defeat"
         state.campaign_over_reason = f"{len(state.aircraft_written_off)} aircraft written off — fleet capability destroyed."
@@ -405,9 +408,9 @@ def _check_fail_states(state: BaseState) -> None:
 
 def _grade(score: int) -> str:
     if score >= 900:  return "Gold — Outstanding"
-    if score >= 750:  return "Silver — Commended"
-    if score >= 600:  return "Bronze — Satisfactory"
-    if score >= 400:  return "Marginal — Needs Improvement"
+    if score >= 800:  return "Silver — Commended"
+    if score >= 700:  return "Bronze — Satisfactory"
+    if score >= 600:  return "Marginal — Survived"
     return "Busted — Campaign Failed"
 
 
@@ -440,28 +443,45 @@ def assign_aircraft(state: BaseState, mission_id: str, aircraft_ids: list[str]) 
 
     for ac_id in aircraft_ids:
         ac = _find_aircraft(state, ac_id)
-        if ac.status != "green":
-            raise ValueError(f"Cannot assign {ac_id}: status is '{ac.status}' (must be green)")
-        if ac.configuration != mission.required_config:
-            _log(state, f"WARNING: {ac_id} config '{ac.configuration}' ≠ mission {mission_id} required '{mission.required_config}'")
-            if correct_config_idle:
-                idle_ids = ", ".join(a.id for a in correct_config_idle)
+
+        if ac.status == "returning":
+            # Pre-assignment: validate aircraft will land before mission departs
+            if ac.return_eta is None:
+                raise ValueError(f"Cannot pre-assign {ac_id}: returning aircraft has no ETA")
+            land_at_hour = state.current_hour + ac.return_eta
+            if land_at_hour >= mission.departure_hour:
+                raise ValueError(
+                    f"Cannot pre-assign {ac_id}: lands at ~{land_at_hour:02d}:00 "
+                    f"but mission {mission_id} departs at {mission.departure_hour:02d}:00"
+                )
+            # Leave status as 'returning' — advance_time will dispatch at departure_hour
+            _log(state, f"{ac_id} pre-assigned to {mission_id} — will auto-dispatch at {mission.departure_hour:02d}:00 after landing")
+        elif ac.status == "green":
+            if ac.configuration != mission.required_config:
+                _log(state, f"WARNING: {ac_id} config '{ac.configuration}' ≠ mission {mission_id} required '{mission.required_config}'")
+                if correct_config_idle:
+                    idle_ids = ", ".join(a.id for a in correct_config_idle)
+                    _score(
+                        state, -20, "Config mismatch",
+                        f"{ac_id} assigned to {mission.type} with wrong config. {idle_ids} had correct config and was idle.",
+                        "decision",
+                    )
+            if ac.remaining_life <= 20:
                 _score(
-                    state, -15, "Config mismatch",
-                    f"{ac_id} assigned to {mission.type} with wrong config. {idle_ids} had correct config and was idle.",
+                    state, -35, "Grounded aircraft flown",
+                    f"{ac_id} sent on {mission.type} sortie with only {ac.remaining_life}h remaining life (threshold: 20h).",
                     "decision",
                 )
-        if ac.remaining_life <= 20:
-            _score(
-                state, -20, "Grounded aircraft flown",
-                f"{ac_id} sent on {mission.type} sortie with only {ac.remaining_life}h remaining life (threshold: 20h).",
-                "decision",
-            )
-        ac.status = "on_mission"
-        ac.location = "on_mission"
+            if mission.departure_hour <= state.current_hour:
+                # Mission already departing / in progress — dispatch immediately
+                ac.status = "on_mission"
+                ac.location = "on_mission"
+            # else: future mission — leave green; advance_time will dispatch at departure_hour
+        else:
+            raise ValueError(f"Cannot assign {ac_id}: status is '{ac.status}' (must be green or returning)")
 
     mission.assigned_aircraft = list(aircraft_ids)
-    _log(state, f"Assigned {', '.join(aircraft_ids)} to mission {mission_id} ({mission.type})")
+    _log(state, f"Assigned {', '.join(aircraft_ids)} to mission {mission_id} ({mission.type}) — departure {mission.departure_hour:02d}:00")
     return state
 
 
@@ -520,14 +540,15 @@ def _write_off_aircraft(state: BaseState, aircraft_id: str) -> None:
         state.aircraft_written_off.append(aircraft_id)
     _log(state, f"CRITICAL: {aircraft_id} WRITTEN OFF — life exhausted. Aircraft permanently out of service.")
     _score(
-        state, -50, f"{aircraft_id} written off",
+        state, -80, f"{aircraft_id} written off",
         f"{aircraft_id} reached 0h remaining life and is permanently grounded.",
         "mixed",
     )
 
 
 def complete_maintenance(state: BaseState, aircraft_id: str) -> BaseState:
-    """Mark maintenance complete; aircraft returns to flight line as green."""
+    """Mark maintenance complete; aircraft returns to flight line as green.
+    If pending_config is set, applies it (reconfiguration complete)."""
     ac = _find_aircraft(state, aircraft_id)
     if ac.status != "red":
         raise ValueError(f"Cannot complete maintenance on {aircraft_id}: status is '{ac.status}' (must be red)")
@@ -539,7 +560,47 @@ def complete_maintenance(state: BaseState, aircraft_id: str) -> BaseState:
     ac.fault = None
     ac.maintenance_eta = None
     ac.location = "flight_line"
-    _log(state, f"{aircraft_id} maintenance complete — returned to flight line (green)")
+
+    if ac.pending_config is not None:
+        old_config = ac.configuration
+        ac.configuration = ac.pending_config
+        ac.pending_config = None
+        _log(state, f"{aircraft_id} reconfiguration complete — {old_config} → {ac.configuration}. Returned to flight line (green)")
+    else:
+        _log(state, f"{aircraft_id} maintenance complete — returned to flight line (green)")
+    return state
+
+
+RECONFIG_HOURS = 3  # hours to reconfigure an aircraft to a different configuration
+
+
+def reconfigure_aircraft(state: BaseState, aircraft_id: str, new_config: str) -> BaseState:
+    """Send a ready (green) aircraft for reconfiguration. Takes RECONFIG_HOURS hours."""
+    valid_configs = {"DCA/CAP", "RECCE", "AI/ST", "AEW&C"}
+    if new_config not in valid_configs:
+        raise ValueError(f"Invalid config '{new_config}' — must be one of {sorted(valid_configs)}")
+    ac = _find_aircraft(state, aircraft_id)
+    if ac.status != "green":
+        raise ValueError(f"Cannot reconfigure {aircraft_id}: status is '{ac.status}' (must be green)")
+    if ac.configuration == new_config:
+        raise ValueError(f"{aircraft_id} is already configured as {new_config}")
+
+    ac.status = "red"
+    ac.fault = f"Reconfiguration: {ac.configuration} → {new_config}"
+    ac.pending_config = new_config
+    ac.maintenance_eta = RECONFIG_HOURS
+    ac.location = "service_bay"
+
+    # Occupy a service bay slot if available
+    target_slot = next(
+        (s for s in state.maintenance_slots if s.type == "service_bay" and len(s.current_occupants) < s.capacity),
+        None,
+    )
+    if target_slot:
+        target_slot.current_occupants.append(aircraft_id)
+        ac.location = target_slot.id
+
+    _log(state, f"{aircraft_id} reconfiguration started: {ac.fault} — ETA {RECONFIG_HOURS}h")
     return state
 
 
@@ -604,10 +665,10 @@ def advance_time(state: BaseState, hours: int) -> BaseState:
 
             # Campaign arc — auto phase escalation
             new_phase = None
-            if state.current_day == 3 and state.ato.phase == "Fred":
+            if state.current_day == 2 and state.ato.phase == "Fred":
                 new_phase = "Kris"
                 _log(state, "CAMPAIGN EVENT: Intelligence confirms threat escalation. Phase: Fred → Kris.")
-            elif state.current_day == 5 and state.ato.phase == "Kris":
+            elif state.current_day == 3 and state.ato.phase == "Kris":
                 new_phase = "Krig"
                 _log(state, "CAMPAIGN EVENT: Hostilities confirmed. Phase: Kris → Krig.")
 
@@ -617,7 +678,7 @@ def advance_time(state: BaseState, hours: int) -> BaseState:
             # Daily readiness bonus
             operational = [ac for ac in state.aircraft if ac.status in ("green", "on_mission", "returning")]
             if len(operational) >= 6:
-                _score(state, +15, "Daily readiness bonus", f"Day ended with {len(operational)} operational aircraft.", "luck")
+                _score(state, +20, "Daily readiness bonus", f"Day ended with {len(operational)} operational aircraft.", "luck")
 
             _log(state, f"--- New day: Day {state.current_day} ({state.ato.phase}) ---")
             generate_new_ato(state)
@@ -635,7 +696,7 @@ def advance_time(state: BaseState, hours: int) -> BaseState:
                 if idle_green:
                     idle_ids = ", ".join(ac.id for ac in idle_green[:3])
                     _score(
-                        state, -30, f"Missed departure: {mission.id}",
+                        state, -45, f"Missed departure: {mission.id}",
                         f"Mission {mission.id} ({mission.type}) departed unassigned. {len(idle_green)} green aircraft were available ({idle_ids}).",
                         "decision",
                     )
@@ -666,6 +727,29 @@ def advance_time(state: BaseState, hours: int) -> BaseState:
                 ac.return_eta -= 1
                 if ac.return_eta <= 0:
                     return_from_mission(state, ac.id)
+
+        # Auto-return: aircraft whose mission return_hour has been reached
+        # (Order: auto-return BEFORE auto-dispatch so same-hour handoffs work correctly)
+        for mission in state.ato.missions:
+            if mission.return_hour == state.current_hour and mission.outcome is None:
+                duration = mission.return_hour - mission.departure_hour
+                if duration <= 0:
+                    duration += 24  # overnight mission
+                flight_hours = max(1, duration)
+                for ac_id in list(mission.assigned_aircraft):
+                    ac = _find_aircraft_safe(state, ac_id)
+                    if ac and ac.status == "on_mission":
+                        return_from_mission(state, ac_id, flight_hours=flight_hours)
+
+        # Auto-dispatch: green aircraft assigned to missions departing this hour
+        for mission in state.ato.missions:
+            if mission.departure_hour == state.current_hour and mission.outcome is None:
+                for ac_id in list(mission.assigned_aircraft):
+                    ac = _find_aircraft_safe(state, ac_id)
+                    if ac and ac.status == "green":
+                        ac.status = "on_mission"
+                        ac.location = "on_mission"
+                        _log(state, f"{ac_id} auto-dispatched on {mission.id} ({mission.type}) at {state.current_hour:02d}:00")
 
         _check_fail_states(state)
 
@@ -813,7 +897,7 @@ def recall_aircraft(state: BaseState, aircraft_id: str) -> BaseState:
         if aircraft_id in mission.assigned_aircraft:
             mission.outcome = "aborted"
             _score(
-                state, -20, f"RTB order — sortie aborted",
+                state, -25, f"RTB order — sortie aborted",
                 f"{aircraft_id} recalled from {mission.type} mission mid-sortie. Effectiveness lost.",
                 "decision",
             )
@@ -866,7 +950,7 @@ def return_from_mission(
             break
 
     _log(state, f"{aircraft_id} returned from mission ({flight_hours}h) — life remaining: {ac.remaining_life}h | fuel -{FUEL_PER_SORTIE}L → {state.resources.fuel:,}L")
-    _score(state, +10, "Sortie completed", f"{aircraft_id} returned safely from sortie.", "luck")
+    _score(state, +5, "Sortie completed", f"{aircraft_id} returned safely from sortie.", "luck")
     state.missions_total += 1
 
     # Resolve mission outcome — skip if sortie was aborted via RTB
@@ -878,12 +962,12 @@ def return_from_mission(
             prob = _compute_success_prob(ac, mission_for_outcome, phase)
             if random.random() < prob:
                 _log(state, f"{aircraft_id} {mission_for_outcome.type} sortie SUCCESSFUL ({int(prob*100)}% chance)")
-                _score(state, +20, "Sortie success", f"{aircraft_id} succeeded on {mission_for_outcome.type} sortie (p={int(prob*100)}%).", "luck")
+                _score(state, +15, "Sortie success", f"{aircraft_id} succeeded on {mission_for_outcome.type} sortie (p={int(prob*100)}%).", "luck")
                 state.missions_completed += 1
                 mission_for_outcome.outcome = "success"
             else:
                 _log(state, f"{aircraft_id} {mission_for_outcome.type} sortie FAILED ({int((1-prob)*100)}% failure chance) — effectiveness degraded")
-                _score(state, -10, "Sortie failed", f"{aircraft_id} failed {mission_for_outcome.type} sortie (p={int(prob*100)}% success, rolled failure).", "luck")
+                _score(state, -25, "Sortie failed", f"{aircraft_id} failed {mission_for_outcome.type} sortie (p={int(prob*100)}% success, rolled failure).", "luck")
                 mission_for_outcome.outcome = "failure"
         mission_for_outcome.assigned_aircraft.remove(aircraft_id)
     else:
@@ -902,7 +986,7 @@ def return_from_mission(
         passed, fault_roll = roll_post_mission()
         if not passed:
             _log(state, f"{aircraft_id} post-mission check FAILED")
-            _score(state, -5, "Post-mission fault", f"{aircraft_id} developed fault after landing — random mechanical failure.", "luck")
+            _score(state, -10, "Post-mission fault", f"{aircraft_id} developed fault after landing — random mechanical failure.", "luck")
             trigger_fault(state, aircraft_id, fault_roll)
         else:
             _log(state, f"{aircraft_id} post-mission check OK")
@@ -937,7 +1021,7 @@ def generate_random_event(state: BaseState) -> BaseState:
         ac = random.choice(green_aircraft)
         _log(state, f"RANDOM EVENT: BIT fault triggered on {ac.id}")
         trigger_fault(state, ac.id)
-        _score(state, -5, "Random BIT fault", f"{ac.id} developed unexpected BIT fault — random mechanical failure.", "luck")
+        _score(state, -10, "Random BIT fault", f"{ac.id} developed unexpected BIT fault — random mechanical failure.", "luck")
 
     elif event_type == "new_mission":
         new_mission = Mission(
@@ -958,10 +1042,10 @@ def generate_random_event(state: BaseState) -> BaseState:
         if manned:
             ac_str = ", ".join(qra_mission.assigned_aircraft)
             _log(state, f"SCRAMBLE: Unidentified contacts detected. QRA ({ac_str}) launched — intercept successful.")
-            _score(state, +25, "QRA scramble — intercept", f"{ac_str} responded to scramble alert. Airspace defended.", "luck")
+            _score(state, +30, "QRA scramble — intercept", f"{ac_str} responded to scramble alert. Airspace defended.", "luck")
         else:
             _log(state, "SCRAMBLE: Unidentified contacts detected. QRA UNMANNED — airspace undefended!")
-            _score(state, -40, "QRA unmanned during scramble", "Scramble alert fired but no aircraft assigned to QRA. Undefended airspace.", "decision")
+            _score(state, -50, "QRA unmanned during scramble", "Scramble alert fired but no aircraft assigned to QRA. Undefended airspace.", "decision")
 
     return state
 
@@ -1043,6 +1127,7 @@ def serialize_state_json(state: BaseState) -> dict:
             "maintenance_eta": ac.maintenance_eta,
             "fault": ac.fault,
             "return_eta": ac.return_eta,
+            "pending_config": ac.pending_config,
         }
 
     def mission_to_dict(m: Mission) -> dict:

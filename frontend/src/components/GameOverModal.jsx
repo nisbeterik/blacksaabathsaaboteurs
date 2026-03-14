@@ -33,7 +33,7 @@ export default function GameOverModal({ state, onReset }) {
         {/* Header */}
         <div className={`px-6 pt-6 pb-4 border-b border-border ${victory ? 'bg-col-green/5' : 'bg-col-red/5'}`}>
           <div className="text-xs uppercase tracking-widest text-text-dim mb-1">
-            {victory ? 'Campaign Complete — Day 7 Survived' : 'Campaign Failed'}
+            {victory ? 'Campaign Complete — Day 3 Survived' : 'Campaign Failed'}
           </div>
           <div className={`text-3xl font-bold mb-1 ${victory ? 'text-col-green' : 'text-col-red'}`}>
             {victory ? 'MISSION ACCOMPLISHED' : 'CAMPAIGN OVER'}

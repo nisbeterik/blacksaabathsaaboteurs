@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, createContext } from 'react'
 import FleetPanel from './components/FleetPanel'
 import MissionsPanel from './components/MissionsPanel'
-import ResourcesPanel from './components/ResourcesPanel'
 import ScorePanel from './components/ScorePanel'
 import ChatPanel from './components/ChatPanel'
 import EventLog from './components/EventLog'
@@ -10,7 +9,33 @@ import GameOverModal from './components/GameOverModal'
 
 export const TooltipCtx = createContext(true)
 
-const TABS = ['Fleet', 'Missions', 'Resources', 'Score']
+const TABS = ['Fleet', 'Missions', 'Score']
+
+function StartScreen({ onStart }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-base text-text-hi gap-8 px-8">
+      <div className="flex flex-col items-center gap-2">
+        <span className="text-col-blue font-bold text-2xl tracking-widest uppercase">SAAB</span>
+        <h1 className="text-3xl font-bold tracking-wider text-text-hi">BASE COMMANDER</h1>
+        <p className="text-text-dim text-sm tracking-wide">Swedish Air Force — Dispersed Road Base Simulator</p>
+      </div>
+      <div className="max-w-md text-center space-y-3 text-sm text-text-lo leading-relaxed border border-border rounded-lg p-6 bg-surface">
+        <p>You are the <span className="text-text-hi font-semibold">Base Battalion Commander</span> of a dispersed road base (vägbas) during a 3-day crisis escalation.</p>
+        <p>Manage your Gripen fleet through three escalating phases: <span className="text-col-green font-semibold">Fred</span> → <span className="text-col-amber font-semibold">Kris</span> → <span className="text-col-red font-semibold">Krig</span>.</p>
+        <p className="text-text-dim text-xs">Assign aircraft to missions, manage maintenance, conserve fuel. Your AI advisor can help — but you decide.</p>
+      </div>
+      <div className="flex flex-col items-center gap-3">
+        <button
+          onClick={onStart}
+          className="px-8 py-3 bg-col-blue text-white font-bold tracking-widest uppercase rounded hover:bg-col-blue/80 transition-colors text-sm"
+        >
+          Begin Campaign
+        </button>
+        <span className="text-text-dim text-xs">Campaign length: 3 days · Starting score: 1000 · Defeat threshold: 600</span>
+      </div>
+    </div>
+  )
+}
 
 const PHASE_DESC = {
   Fred: 'Peacetime — low readiness, normal ops',
@@ -46,7 +71,19 @@ function isCritical(prev, next) {
     next.current_hour >= m.departure_hour
   )
   const newWriteOff = (next.aircraft_written_off?.length ?? 0) > (prev.aircraft_written_off?.length ?? 0)
-  return newFault || lifeDrop || dayRollover || missedDeparture || newWriteOff
+  // Pause when any mission outcome changes from null → resolved
+  const prevMissions = new Map((prev.ato?.missions ?? []).map(m => [m.id, m.outcome]))
+  const missionResolved = (next.ato?.missions ?? []).some(m =>
+    prevMissions.get(m.id) == null && m.outcome != null
+  )
+  // Only pause on mission resolution if there are upcoming missions still needing aircraft
+  const hasUnassignedUpcoming = (next.ato?.missions ?? []).some(m =>
+    m.outcome == null &&
+    m.departure_hour > next.current_hour &&
+    (m.assigned_aircraft?.length ?? 0) < m.required_aircraft
+  )
+  const pauseForMission = missionResolved && hasUnassignedUpcoming
+  return newFault || lifeDrop || dayRollover || missedDeparture || newWriteOff || pauseForMission
 }
 
 async function apiFetch(path, options = {}) {
@@ -62,6 +99,7 @@ async function apiFetch(path, options = {}) {
 }
 
 export default function App() {
+  const [gameStarted, setGameStarted] = useState(false)
   const [state, setState] = useState(null)
   const [activeTab, setActiveTab] = useState('Fleet')
   const [fleetFilter, setFleetFilter] = useState(null)
@@ -139,7 +177,14 @@ export default function App() {
           setAutoplay(false)
         } else if (isCritical(prev, checkState)) {
           setAutoplay(false)
-          showToast('⏸ Autoplay paused — critical event', 'info')
+          const prevMissions = new Map((prev?.ato?.missions ?? []).map(m => [m.id, m.outcome]))
+          const resolved = (checkState.ato?.missions ?? []).find(m =>
+            prevMissions.get(m.id) == null && m.outcome != null
+          )
+          const pauseReason = resolved
+            ? `Mission ${resolved.id} ${resolved.outcome} — review & reassign`
+            : 'Critical event'
+          showToast(`⏸ Paused — ${pauseReason}`, 'info')
         } else {
           prevStateRef.current = checkState
         }
@@ -220,6 +265,10 @@ export default function App() {
   const inMaint   = state?.aircraft?.filter(a => a.status === 'red').length ?? 0
   const grey      = state?.aircraft?.filter(a => a.status === 'grey').length ?? 0
 
+  if (!gameStarted) {
+    return <StartScreen onStart={() => setGameStarted(true)} />
+  }
+
   return (
     <TooltipCtx.Provider value={tooltipsEnabled}>
     <div className="flex flex-col h-screen bg-base text-text-hi overflow-hidden">
@@ -291,16 +340,43 @@ export default function App() {
               {/* Campaign score */}
               <span
                 className={`font-bold cursor-pointer hover:underline ${
-                  state.campaign_score >= 750 ? 'text-col-green' :
-                  state.campaign_score >= 600 ? 'text-col-amber' :
-                  state.campaign_score >= 400 ? 'text-col-red' : 'text-col-red animate-pulse'
+                  state.campaign_score >= 800 ? 'text-col-green' :
+                  state.campaign_score >= 700 ? 'text-col-amber' :
+                  state.campaign_score >= 600 ? 'text-col-red' : 'text-col-red animate-pulse'
                 }`}
                 onClick={() => setActiveTab('Score')}
                 title={state.campaign_grade}
               >
                 {state.campaign_score}pts
               </span>
-              <span className="text-text-dim">Day {state.current_day}/7</span>
+              <span className="text-text-dim">Day {state.current_day}/3</span>
+              <span className="text-text-dim">|</span>
+              {/* Fuel indicator + resupply */}
+              {(() => {
+                const fuel    = state.resources?.fuel ?? 0
+                const sorties = Math.floor(fuel / 4000)
+                const fuelCol = sorties > 20 ? 'text-col-green' : sorties > 8 ? 'text-col-amber' : 'text-col-red animate-pulse'
+                return (
+                  <>
+                    <span className={`font-semibold ${fuelCol}`} title={`${fuel.toLocaleString()}L fuel available`}>
+                      ⛽ {sorties} sorties
+                    </span>
+                    {state.resupply_eta != null
+                      ? <span className="text-col-green text-xs animate-pulse" title={`Convoy arrives in ${state.resupply_eta}h — +30,000L fuel`}>
+                          Convoy {state.resupply_eta}h
+                        </span>
+                      : <button
+                          onClick={() => runAction('/api/action/request-resupply')}
+                          disabled={actionLoading}
+                          className="text-xs px-1.5 py-0.5 rounded border border-col-green/40 text-col-green hover:bg-col-green/10 disabled:opacity-40 transition-colors"
+                          title="Request resupply convoy — +30,000L fuel in 8h"
+                        >
+                          Resupply
+                        </button>
+                    }
+                  </>
+                )
+              })()}
             </>
           )}
           {!state && <span className="text-text-dim animate-pulse">Connecting...</span>}
@@ -349,14 +425,6 @@ export default function App() {
               <MissionsPanel
                 state={state}
                 onAssign={(mid, aids) => runAction('/api/action/assign-aircraft', { mission_id: mid, aircraft_ids: aids })}
-              />
-            )}
-            {state && activeTab === 'Resources' && (
-              <ResourcesPanel
-                state={state}
-                onRequestResupply={() => runAction('/api/action/request-resupply')}
-                onApplyUE={(aircraft_id, ue_type) => runAction('/api/action/apply-exchange-unit', { aircraft_id, ue_type })}
-                loading={actionLoading}
               />
             )}
             {state && activeTab === 'Score'     && <ScorePanel state={state} />}

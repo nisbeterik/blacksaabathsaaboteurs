@@ -25,7 +25,7 @@ from engine import (
     trigger_fault, complete_maintenance,
     advance_time, return_from_mission, assign_aircraft,
     generate_random_event, generate_new_ato, recall_aircraft, set_phase,
-    request_resupply, apply_exchange_unit,
+    request_resupply, apply_exchange_unit, reconfigure_aircraft,
 )
 from llm_integration import LLMAssistant
 from demo_scenarios import DEMO_SCRIPT
@@ -74,6 +74,10 @@ class DemoRunRequest(BaseModel):
 class ApplyUERequest(BaseModel):
     aircraft_id: str
     ue_type: str
+
+class ReconfigureRequest(BaseModel):
+    aircraft_id: str
+    new_config: str
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +195,14 @@ def api_request_resupply():
 def api_apply_exchange_unit(body: ApplyUERequest):
     try:
         apply_exchange_unit(get_state(), body.aircraft_id, body.ue_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return serialize_state_json(get_state())
+
+@app.post("/api/action/reconfigure-aircraft")
+def api_reconfigure_aircraft(body: ReconfigureRequest):
+    try:
+        reconfigure_aircraft(get_state(), body.aircraft_id, body.new_config)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return serialize_state_json(get_state())

@@ -1,4 +1,4 @@
-import { useState, useContext, useRef, useEffect } from 'react'
+import { useState, useContext, useRef, useEffect, useCallback } from 'react'
 import { TooltipCtx } from '../App'
 import Tooltip from './Tooltip'
 import { GLOSSARY } from '../tooltips'
@@ -19,21 +19,73 @@ const TYPE_BG = {
   AEW:    '#484f58',
 }
 
+const OUTCOME_COLORS = {
+  success: '#3fb950',
+  failure: '#f85149',
+  aborted: '#484f58',
+}
+
+
 function pad(n) {
   return String(n).padStart(2, '0')
 }
 
-function MissionRow({ mission, selected, onClick }) {
+function ConfirmModal({ message, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-surface border border-col-amber/50 rounded-lg p-5 max-w-sm w-full mx-4 space-y-4 shadow-xl">
+        <div className="flex items-start gap-3">
+          <span className="text-col-amber text-lg flex-shrink-0">⚠</span>
+          <p className="text-sm text-text-hi leading-relaxed">{message}</p>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-1.5 text-xs border border-border text-text-lo hover:text-text-hi rounded transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-1.5 text-xs bg-col-amber text-black font-bold rounded hover:bg-col-amber/80 transition-colors"
+          >
+            Assign Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MissionRow({ mission, selected, onClick, state }) {
   const assigned = mission.assigned_aircraft ?? []
   const tooltipsEnabled = useContext(TooltipCtx)
   const needed   = mission.required_aircraft - assigned.length
   const full     = needed <= 0
+  const allAc    = state?.aircraft ?? []
+
+  // Count ready aircraft with matching config (for planning visibility)
+  const matchingReady = !mission.outcome
+    ? allAc.filter(a => a.status === 'green' && a.configuration === mission.required_config).length
+    : 0
+
+  // Status badge label + color
+  const outcomeBadge = mission.outcome
+    ? { success: '✓ COMPLETE', failure: '✗ FAILED', aborted: '↩ ABORTED' }[mission.outcome] ?? mission.outcome.toUpperCase()
+    : full ? '✓ ASSIGNED' : `⚠ NEED ${needed}`
+  const outcomeBadgeColor = mission.outcome
+    ? mission.outcome === 'success'
+      ? 'text-col-green bg-col-green/10'
+      : mission.outcome === 'failure'
+        ? 'text-col-red bg-col-red/10'
+        : 'text-text-dim bg-raised'
+    : full ? 'text-col-green bg-col-green/10' : 'text-col-amber bg-col-amber/10'
 
   return (
     <div
       onClick={onClick}
       className={`bg-surface border rounded p-3 space-y-2 cursor-pointer transition-colors hover:border-col-blue/50
-        ${selected ? 'border-col-blue' : full ? 'border-border' : 'border-col-amber/50'}`}
+        ${selected ? 'border-col-blue' : full || mission.outcome ? 'border-border' : 'border-col-amber/50'}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -42,8 +94,8 @@ function MissionRow({ mission, selected, onClick }) {
             <span className={`text-xs font-bold tracking-wider ${TYPE_COLOR[mission.type] ?? 'text-text-lo'}`}>{mission.type}</span>
           </Tooltip>
         </div>
-        <div className={`text-xs font-semibold px-1.5 py-0.5 rounded ${full ? 'text-col-green bg-col-green/10' : 'text-col-amber bg-col-amber/10'}`}>
-          {assigned.length}/{mission.required_aircraft} {full ? '✓ ASSIGNED' : `⚠ NEED ${needed}`}
+        <div className={`text-xs font-semibold px-1.5 py-0.5 rounded ${outcomeBadgeColor}`}>
+          {outcomeBadge}
         </div>
       </div>
 
@@ -64,7 +116,31 @@ function MissionRow({ mission, selected, onClick }) {
         </Tooltip>
       </div>
 
-      {assigned.length > 0 && (
+      {/* Config-matching aircraft count — only for pending missions */}
+      {!mission.outcome && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-text-dim">Ready with config:</span>
+          <span className={`font-semibold ${matchingReady >= mission.required_aircraft ? 'text-col-green' : matchingReady > 0 ? 'text-col-amber' : 'text-col-red'}`}>
+            {matchingReady} / {mission.required_aircraft}
+          </span>
+        </div>
+      )}
+
+      {/* Outcome result banner */}
+      {mission.outcome && (
+        <div className={`text-xs font-bold px-2 py-1 rounded text-center border
+          ${mission.outcome === 'success'
+            ? 'bg-col-green/10 text-col-green border-col-green/30'
+            : mission.outcome === 'failure'
+              ? 'bg-col-red/10 text-col-red border-col-red/30'
+              : 'bg-raised text-text-dim border-border'}`}>
+          {mission.outcome === 'success' ? '✓ Mission Success'
+            : mission.outcome === 'failure' ? '✗ Mission Failed'
+            : '↩ Aborted — RTB ordered'}
+        </div>
+      )}
+
+      {assigned.length > 0 && !mission.outcome && (
         <div className="flex flex-wrap gap-1">
           {assigned.map(id => (
             <span key={id} className="px-1.5 py-0.5 bg-col-blue/10 border border-col-blue/30 text-col-blue text-xs rounded">
@@ -86,6 +162,7 @@ export default function MissionsPanel({ state, onAssign }) {
   const [selectedAircraft, setSelectedAircraft] = useState([])
   const [assigning, setAssigning]               = useState(false)
   const [error, setError]                       = useState(null)
+  const [confirmModal, setConfirmModal]         = useState(null) // { message, onConfirm }
   const assignFormRef = useRef(null)
 
   useEffect(() => {
@@ -107,14 +184,7 @@ export default function MissionsPanel({ state, onAssign }) {
   )
   const assignableAircraft = [...greenAircraft, ...returningAssignable]
 
-  const handleAssign = async () => {
-    if (!selectedMission || selectedAircraft.length === 0) return
-    if (hasMismatch) {
-      const ok = window.confirm(
-        `Config mismatch: not all selected aircraft match the required config "${selectedMissionObj.required_config}".\n\nThey will need reconfiguration before departure. Proceed anyway?`
-      )
-      if (!ok) return
-    }
+  const doAssign = useCallback(async () => {
     setAssigning(true)
     setError(null)
     try {
@@ -126,6 +196,18 @@ export default function MissionsPanel({ state, onAssign }) {
     } finally {
       setAssigning(false)
     }
+  }, [selectedMission, selectedAircraft, onAssign])
+
+  const handleAssign = () => {
+    if (!selectedMission || selectedAircraft.length === 0) return
+    if (hasMismatch) {
+      setConfirmModal({
+        message: `Config mismatch: not all selected aircraft match the required config "${selectedMissionObj.required_config}". They will fly with a −15% success penalty. Proceed anyway?`,
+        onConfirm: () => { setConfirmModal(null); doAssign() },
+      })
+      return
+    }
+    doAssign()
   }
 
   const toggleAircraft = (id) => {
@@ -141,13 +223,20 @@ export default function MissionsPanel({ state, onAssign }) {
 
   return (
     <div className="space-y-4">
+      {confirmModal && (
+        <ConfirmModal
+          message={confirmModal.message}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
 
       {/* ATO Coverage summary */}
       {(() => {
         const total    = missions.length
-        const covered  = missions.filter(m => (m.assigned_aircraft ?? []).length >= m.required_aircraft).length
-        const partial  = missions.filter(m => (m.assigned_aircraft ?? []).length > 0 && (m.assigned_aircraft ?? []).length < m.required_aircraft).length
-        const missing  = missions.filter(m => (m.assigned_aircraft ?? []).length === 0).length
+        const covered  = missions.filter(m => (m.assigned_aircraft ?? []).length >= m.required_aircraft || m.outcome).length
+        const partial  = missions.filter(m => !m.outcome && (m.assigned_aircraft ?? []).length > 0 && (m.assigned_aircraft ?? []).length < m.required_aircraft).length
+        const missing  = missions.filter(m => !m.outcome && (m.assigned_aircraft ?? []).length === 0).length
         const allGood  = covered === total
         return (
           <div className={`border rounded p-3 flex items-center gap-4 ${allGood ? 'bg-col-green/5 border-col-green/30' : 'bg-col-amber/5 border-col-amber/30'}`}>
@@ -158,7 +247,7 @@ export default function MissionsPanel({ state, onAssign }) {
                 </Tooltip>
               </div>
               <div className="flex gap-3 text-xs">
-                <span className="text-col-green">{covered} fully assigned</span>
+                <span className="text-col-green">{covered} assigned/complete</span>
                 {partial > 0 && <span className="text-col-amber">{partial} partial</span>}
                 {missing > 0 && <span className="text-col-red">{missing} unassigned</span>}
               </div>
@@ -168,9 +257,12 @@ export default function MissionsPanel({ state, onAssign }) {
                 const assigned = m.assigned_aircraft ?? []
                 const full = assigned.length >= m.required_aircraft
                 const none = assigned.length === 0
-                const color = full ? 'bg-col-green' : none ? 'bg-col-red' : 'bg-col-amber'
+                const color = m.outcome === 'success' ? 'bg-col-green'
+                  : m.outcome === 'failure' ? 'bg-col-red'
+                  : m.outcome === 'aborted' ? 'bg-raised border border-border'
+                  : full ? 'bg-col-green' : none ? 'bg-col-red' : 'bg-col-amber'
                 return (
-                  <div key={m.id} className="flex flex-col items-center gap-0.5" title={`${m.id} ${m.type}: ${assigned.length}/${m.required_aircraft}`}>
+                  <div key={m.id} className="flex flex-col items-center gap-0.5" title={`${m.id} ${m.type}: ${assigned.length}/${m.required_aircraft}${m.outcome ? ` — ${m.outcome}` : ''}`}>
                     <div className={`w-2 h-2 rounded-full ${color}`} />
                     <span className="text-[9px] text-text-dim">{m.id}</span>
                   </div>
@@ -187,7 +279,7 @@ export default function MissionsPanel({ state, onAssign }) {
           ATO Timeline — Day {state?.ato?.day} ({state?.ato?.phase})
         </div>
 
-        {/* Hour ruler with gridlines */}
+        {/* Hour ruler */}
         <div className="flex mb-1">
           <div className="w-20 flex-shrink-0" />
           <div className="flex-1 relative h-4">
@@ -197,14 +289,14 @@ export default function MissionsPanel({ state, onAssign }) {
                 className="absolute text-[10px] text-text-dim select-none"
                 style={{ left: `${(h / 24) * 100}%`, transform: 'translateX(-50%)' }}
               >
-                {h % 4 === 0 ? pad(h) : '·'}
+                {pad(h)}
               </span>
             ))}
           </div>
         </div>
 
-        {/* Mission bars */}
-        {[...missions].sort((a, b) => a.departure_hour - b.departure_hour).map(m => {
+        {/* Mission bars — NO sort, order matches ATO order */}
+        {missions.map(m => {
           const start      = (m.departure_hour / 24) * 100
           const duration   = m.return_hour > m.departure_hour
             ? m.return_hour - m.departure_hour
@@ -213,7 +305,11 @@ export default function MissionsPanel({ state, onAssign }) {
           const assigned   = m.assigned_aircraft ?? []
           const full       = assigned.length >= m.required_aircraft
           const unassigned = assigned.length === 0
-          const barColor   = unassigned ? '#f85149' : full ? (TYPE_BG[m.type] ?? '#484f58') : '#d29922'
+          const barColor   = m.outcome
+            ? (OUTCOME_COLORS[m.outcome] ?? '#484f58')
+            : unassigned ? '#f85149'
+            : full ? (TYPE_BG[m.type] ?? '#484f58')
+            : '#d29922'
 
           return (
             <div key={m.id} className="flex items-center mb-1">
@@ -222,9 +318,9 @@ export default function MissionsPanel({ state, onAssign }) {
                 <span className={`font-bold text-[10px] ${TYPE_COLOR[m.type] ?? 'text-text-lo'}`}>{m.type}</span>
               </div>
               <div className="flex-1 h-5 bg-raised rounded relative overflow-hidden">
-                {/* Subtle 4h gridlines */}
-                {[4, 8, 12, 16, 20].map(h => (
-                  <div key={h} className="absolute top-0 bottom-0 w-px bg-border opacity-40"
+                {/* 2h gridlines — 6h marks slightly brighter */}
+                {[2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map(h => (
+                  <div key={h} className={`absolute top-0 bottom-0 w-px bg-border ${h % 6 === 0 ? 'opacity-60' : 'opacity-25'}`}
                     style={{ left: `${(h / 24) * 100}%` }} />
                 ))}
                 <div
@@ -239,7 +335,11 @@ export default function MissionsPanel({ state, onAssign }) {
                     outlineOffset: '1px',
                   }}
                 >
-                  {unassigned ? '?' : assigned.join('+')}
+                  {m.outcome
+                    ? ({ success: '✓', failure: '✗', aborted: '↩' }[m.outcome] ?? '?')
+                    : unassigned
+                      ? (width >= 6 ? 'Unassigned' : '—')
+                      : assigned.join('+')}
                 </div>
               </div>
             </div>
@@ -262,7 +362,7 @@ export default function MissionsPanel({ state, onAssign }) {
         )}
       </div>
 
-      {/* Mission cards */}
+      {/* Mission cards — NO sort, ATO order */}
       <div className="grid grid-cols-2 gap-2">
         {missions.map(m => (
           <MissionRow
@@ -270,6 +370,7 @@ export default function MissionsPanel({ state, onAssign }) {
             mission={m}
             selected={selectedMission === m.id}
             onClick={() => { setSelectedMission(m.id); setSelectedAircraft([]) }}
+            state={state}
           />
         ))}
       </div>
@@ -286,7 +387,7 @@ export default function MissionsPanel({ state, onAssign }) {
             className="w-full bg-raised border border-border rounded px-2 py-1.5 text-sm text-text-hi focus:outline-none focus:border-col-blue"
           >
             <option value="">— select mission —</option>
-            {missions.map(m => (
+            {missions.filter(m => !m.outcome).map(m => (
               <option key={m.id} value={m.id}>
                 {m.id} | {m.type} | {pad(m.departure_hour)}:00 — {m.required_config}
               </option>
@@ -308,8 +409,8 @@ export default function MissionsPanel({ state, onAssign }) {
               <span className="text-xs text-text-dim">No available aircraft</span>
             )}
             {assignableAircraft.map(ac => {
-              const mismatch = selectedMissionObj && ac.configuration !== selectedMissionObj.required_config
-              const selected = selectedAircraft.includes(ac.id)
+              const mismatch    = selectedMissionObj && ac.configuration !== selectedMissionObj.required_config
+              const selected    = selectedAircraft.includes(ac.id)
               const isReturning = ac.status === 'returning'
               return (
                 <button

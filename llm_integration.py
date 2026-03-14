@@ -27,7 +27,7 @@ PRIMARY_MODEL = "google/gemini-2.0-flash-001"
 FALLBACK_MODEL = "google/gemini-flash-1.5"
 
 # Max tokens to request in LLM response
-MAX_RESPONSE_TOKENS = 1024
+MAX_RESPONSE_TOKENS = 700
 
 # How many recent conversation turns to keep in context (each turn = user + assistant)
 MAX_HISTORY_TURNS = 8
@@ -122,7 +122,15 @@ def serialize_state(state: BaseState) -> str:
     # ATO — sorted by departure_hour (chronological order)
     lines.append(f"--- ATO — Day {state.ato.day} ({state.ato.phase}) ---")
     for m in sorted(state.ato.missions, key=lambda m: m.departure_hour):
-        lines.append(_fmt_mission(m))
+        assigned = ", ".join(m.assigned_aircraft) if m.assigned_aircraft else "UNASSIGNED"
+        needed = m.required_aircraft - len(m.assigned_aircraft)
+        shortfall = f" ⚠ SHORTFALL: need {needed} more" if needed > 0 else ""
+        outcome = f" | Outcome: {m.outcome.upper()}" if m.outcome else ""
+        lines.append(
+            f"  {m.id} [{m.type}] — {m.required_config} × {m.required_aircraft} | "
+            f"Dep: {m.departure_hour:02d}:00 → Ret: {m.return_hour:02d}:00 | "
+            f"Assigned: {assigned}{shortfall}{outcome}"
+        )
     lines.append("")
 
     # Maintenance slots
@@ -149,6 +157,14 @@ SYSTEM_PROMPT_TEMPLATE = """\
 You are an AI decision support assistant at a Swedish Air Force dispersed road base (vägbas). \
 You help the Base Battalion Commander make operational decisions during a 7-day crisis campaign.
 
+RESPONSE FORMAT (mandatory):
+- No preamble. No closing pleasantries.
+- Address each unresolved mission on its own line, separated by a blank line.
+- For each mission: 1 sentence recommendation (aircraft ID + mission ID), then 2–3 option bullets.
+- Bullet format: "• [ID] — [config match/mismatch] | life: [Xh] | if fails: [consequence] | score risk: [±pts]"
+- End each mission block with 1 trade-off sentence.
+- If asked a yes/no question, answer it directly first, then elaborate briefly.
+
 CONTEXT:
 - Campaign: Day {current_day}/7 | Phase: {phase} | Score: {campaign_score}/1000 ({campaign_grade})
 - Missions: {missions_completed} completed / {missions_total} flown | Aircraft written off: {written_off_count}
@@ -169,10 +185,10 @@ ASSIGNMENT RULES (hard constraints):
 TRADE-OFF REASONING (critical):
 When the player asks for a recommendation, always:
 1. Enumerate 2-3 concrete options (with specific aircraft IDs)
-2. For each option: state the rough success probability and the downside risk
+2. For each option: state the config match, life level, and the downside risk if it fails
 3. Argue the trade-off — what you gain vs what you risk
 4. Make a clear recommendation, but acknowledge the uncertainty
-Example format: "Option A: assign GE03 — 78% success, burns 2h life, leaves fleet balanced. Option B: assign GE08 — 52% success, risks write-off if post-mission fault. Recommend A unless urgency is extreme."
+Example: "Rec: assign GE03 to M02. • GE03 — config match, 110h life | if fails: mission lost, no write-off risk | score: −25 luck. • GE08 — config match, 20h life | if fails: likely write-off | score: −80 mixed. Trade-off: GE03 is safe; GE08 risks permanent loss."
 
 SCORE IMPACT AWARENESS:
 - Sending a mis-configured aircraft when a correct one is idle: -15 pts (your decision)

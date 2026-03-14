@@ -25,6 +25,7 @@ class Aircraft:
     maintenance_eta: int | None = None  # hours until maintenance complete
     fault: str | None = None            # current fault description if any
     return_eta: int | None = None       # hours until aircraft returns to base (when status="returning")
+    pending_config: str | None = None   # target configuration applied when reconfiguration completes
     # status can be: "green", "red", "grey", "on_mission", "returning", "written_off"
 
 

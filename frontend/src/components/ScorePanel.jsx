@@ -4,16 +4,24 @@ const CATEGORY_COLOR = {
   mixed:    'text-text-lo',
 }
 
-const CATEGORY_LABEL = {
-  decision: 'YOUR CALL',
-  luck:     'BAD LUCK',
-  mixed:    'MIXED',
+function categoryLabel(category, delta) {
+  if (category === 'decision') return 'YOUR CALL'
+  if (category === 'mixed') return 'MIXED'
+  if (category === 'luck') return delta >= 0 ? 'GOOD LUCK' : 'BAD LUCK'
+  return category.toUpperCase()
+}
+
+function categoryColor(category, delta) {
+  if (category === 'decision') return 'text-col-red'
+  if (category === 'mixed') return 'text-text-lo'
+  if (category === 'luck') return delta >= 0 ? 'text-col-green' : 'text-col-amber'
+  return 'text-text-dim'
 }
 
 function gradeColor(score) {
-  if (score >= 750) return 'text-col-green'
-  if (score >= 600) return 'text-col-amber'
-  if (score >= 400) return 'text-col-red'
+  if (score >= 800) return 'text-col-green'
+  if (score >= 700) return 'text-col-amber'
+  if (score >= 600) return 'text-col-red'
   return 'text-col-red animate-pulse'
 }
 
@@ -46,7 +54,7 @@ export default function ScorePanel({ state }) {
           </div>
           <div className="text-right">
             <div className="text-xs text-text-dim uppercase tracking-wider mb-1">Campaign Progress</div>
-            <div className="text-xl font-bold text-text-hi">Day {day}<span className="text-text-dim text-sm">/7</span></div>
+            <div className="text-xl font-bold text-text-hi">Day {day}<span className="text-text-dim text-sm">/3</span></div>
             {writtenOff.length > 0 && (
               <div className="text-xs text-col-red/80 mt-0.5">{writtenOff.length} aircraft lost</div>
             )}
@@ -107,6 +115,7 @@ export default function ScorePanel({ state }) {
           <div className="flex gap-3 text-xs">
             <span className="text-col-red">■ Your call</span>
             <span className="text-col-amber">■ Bad luck</span>
+            <span className="text-col-green">■ Good luck</span>
             <span className="text-text-dim">■ Mixed</span>
           </div>
         </div>
@@ -119,8 +128,8 @@ export default function ScorePanel({ state }) {
               <div className="flex-shrink-0 text-xs text-text-dim w-14">
                 D{e.day} {String(e.hour).padStart(2, '0')}:00
               </div>
-              <div className={`flex-shrink-0 text-xs font-bold w-16 ${CATEGORY_COLOR[e.category] ?? 'text-text-dim'}`}>
-                {CATEGORY_LABEL[e.category] ?? e.category}
+              <div className={`flex-shrink-0 text-xs font-bold w-16 ${categoryColor(e.category, e.delta)}`}>
+                {categoryLabel(e.category, e.delta)}
               </div>
               <div className={`flex-shrink-0 text-xs font-bold w-10 ${e.delta >= 0 ? 'text-col-green' : 'text-col-red'}`}>
                 {e.delta >= 0 ? `+${e.delta}` : e.delta}
@@ -137,8 +146,8 @@ export default function ScorePanel({ state }) {
       {/* Defeat thresholds reminder */}
       <div className="bg-surface border border-border rounded p-3 text-xs space-y-1 text-text-dim">
         <div className="text-text-lo uppercase tracking-wider mb-1.5">Defeat Conditions</div>
-        <div className={score < 400 ? 'text-col-red font-semibold' : ''}>Score below 400 → Campaign failed</div>
-        <div className={writtenOff.length >= 4 ? 'text-col-red font-semibold' : ''}>4+ aircraft written off → Strategic defeat</div>
+        <div className={score < 600 ? 'text-col-red font-semibold' : ''}>Score below 600 → Campaign failed</div>
+        <div className={writtenOff.length >= 3 ? 'text-col-red font-semibold' : ''}>3+ aircraft written off → Strategic defeat</div>
         <div>Fleet &lt; 3 operational for 6+ hours → Collapse</div>
       </div>
 

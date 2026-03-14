@@ -1,4 +1,4 @@
-import { useContext } from 'react'
+import { useContext, useState } from 'react'
 import { TooltipCtx } from '../App'
 import Tooltip from './Tooltip'
 import { GLOSSARY } from '../tooltips'
@@ -73,10 +73,38 @@ function lifeTextColor(life) {
   return 'text-col-red'
 }
 
-function AircraftCard({ ac, mission, onAction }) {
+const ALL_CONFIGS = ['DCA/CAP', 'RECCE', 'AI/ST', 'AEW&C']
+
+function ConfirmModal({ title, message, onConfirm, onCancel, confirmLabel = 'Confirm', confirmClass = 'bg-col-red text-white' }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-surface border border-border rounded-lg p-5 max-w-sm w-full mx-4 space-y-4 shadow-xl">
+        {title && <div className="text-sm font-bold text-text-hi">{title}</div>}
+        <p className="text-sm text-text-lo leading-relaxed">{message}</p>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-1.5 text-xs border border-border text-text-lo hover:text-text-hi rounded transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`px-4 py-1.5 text-xs font-bold rounded hover:opacity-80 transition-opacity ${confirmClass}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AircraftCard({ ac, mission, onAction, exchangeUnits }) {
   const s = STATUS_CONFIG[ac.status] ?? STATUS_CONFIG.grey
   const tooltipsEnabled = useContext(TooltipCtx)
   const lifePct = Math.min(100, Math.round((ac.remaining_life / 200) * 100))
+  const [rtbModal, setRtbModal] = useState(false)
 
   return (
     <div className={`bg-surface border ${s.border} rounded p-3 flex flex-col gap-1.5`}>
@@ -151,15 +179,69 @@ function AircraftCard({ ac, mission, onAction }) {
         </div>
       )}
 
+      {/* Reconfigure — only for ready aircraft */}
+      {ac.status === 'green' && (
+        <div className="pt-0.5">
+          <div className="text-[10px] text-text-dim mb-1 uppercase tracking-wider">Reconfigure (3h)</div>
+          <div className="flex flex-wrap gap-1">
+            {ALL_CONFIGS.filter(c => c !== ac.configuration).map(cfg => (
+              <button
+                key={cfg}
+                onClick={() => onAction('/api/action/reconfigure-aircraft', { aircraft_id: ac.id, new_config: cfg })}
+                title={`Reconfigure ${ac.id} to ${cfg} — takes 3h`}
+                className="px-1.5 py-0.5 text-[10px] border border-col-blue/40 text-col-blue hover:bg-col-blue/10 rounded transition-colors"
+              >
+                → {cfg}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Reconfiguration in progress badge */}
+      {ac.status === 'red' && ac.pending_config && (
+        <div className="text-[10px] text-col-blue bg-col-blue/10 border border-col-blue/30 rounded px-2 py-0.5">
+          Reconfiguring → {ac.pending_config}
+        </div>
+      )}
+
+      {/* Exchange Unit application — only for aircraft in maintenance with ETA > 1h */}
+      {ac.status === 'red' && !ac.pending_config && ac.maintenance_eta > 1 && Object.keys(exchangeUnits ?? {}).length > 0 && (
+        <div className="pt-0.5">
+          <div className="text-[10px] text-text-dim mb-1 uppercase tracking-wider">Apply Exchange Unit (−4h ETA)</div>
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(exchangeUnits).map(([ueType, count]) => (
+              <button
+                key={ueType}
+                onClick={() => onAction('/api/action/apply-exchange-unit', { aircraft_id: ac.id, ue_type: ueType })}
+                disabled={count === 0}
+                title={`Apply ${ueType} — ETA ${ac.maintenance_eta}h → ${Math.max(1, ac.maintenance_eta - 4)}h (${count} available)`}
+                className="px-1.5 py-0.5 text-[10px] border border-col-amber/40 text-col-amber hover:bg-col-amber/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {ueType} ({count})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* RTB confirm modal */}
+      {rtbModal && (
+        <ConfirmModal
+          title={`RTB — ${ac.id}`}
+          message={`Order ${ac.id} to return to base? The sortie is aborted (−25 pts) and post-mission check still applies on landing. Only use this if you need the aircraft urgently for a higher-priority task.`}
+          confirmLabel="Order RTB"
+          confirmClass="bg-col-red text-white"
+          onConfirm={() => { setRtbModal(false); onAction('/api/action/recall-aircraft', { aircraft_id: ac.id }) }}
+          onCancel={() => setRtbModal(false)}
+        />
+      )}
+
       {/* Action buttons */}
       <div className="flex gap-1 pt-0.5">
         {ac.status === 'on_mission' && (
           <button
-            onClick={() => {
-              if (window.confirm(`Order ${ac.id} to return to base?\n\n⚠ Consequence: sortie aborted (−20 pts), post-mission check still applies on landing.\n\nOnly RTB if you need this aircraft urgently for a higher-priority task.`)) {
-                onAction('/api/action/recall-aircraft', { aircraft_id: ac.id })
-              }
-            }}
+            onClick={() => setRtbModal(true)}
             className="flex-1 py-0.5 text-xs border border-col-blue/40 text-col-blue hover:bg-col-blue/10 rounded transition-colors"
           >
             RTB ⚠
@@ -171,7 +253,8 @@ function AircraftCard({ ac, mission, onAction }) {
 }
 
 export default function FleetPanel({ state, onAction, fleetFilter, onClearFilter }) {
-  const aircraft = state?.aircraft ?? []
+  const aircraft      = state?.aircraft ?? []
+  const exchangeUnits = state?.resources?.exchange_units ?? {}
 
   const missionByAircraft = {}
   ;(state?.ato?.missions ?? []).forEach(m => {
@@ -220,29 +303,6 @@ export default function FleetPanel({ state, onAction, fleetFilter, onClearFilter
         </div>
       )}
 
-      {/* Wear summary — hidden when filtered */}
-      {!fleetFilter && (
-        <div className="bg-surface border border-border rounded p-3">
-          <div className="text-xs text-text-dim uppercase tracking-wider mb-2">Fleet Wear — hours to heavy service</div>
-          <div className="space-y-1.5">
-            {[...aircraft].filter(a => a.status !== 'written_off').sort((a, b) => a.remaining_life - b.remaining_life).map(ac => (
-              <div key={ac.id} className="flex items-center gap-2">
-                <span className="text-xs text-text-lo w-10 flex-shrink-0">{ac.id}</span>
-                <div className="flex-1 h-2 bg-raised rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${lifeColor(ac.remaining_life)}`}
-                    style={{ width: `${Math.min(100, (ac.remaining_life / 200) * 100)}%` }}
-                  />
-                </div>
-                <span className={`text-xs w-12 text-right flex-shrink-0 ${lifeTextColor(ac.remaining_life)}`}>
-                  {ac.remaining_life}h
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Aircraft cards grouped by status */}
       {visibleGroups.map(g => (
         <div key={g.key}>
@@ -257,6 +317,7 @@ export default function FleetPanel({ state, onAction, fleetFilter, onClearFilter
                 ac={ac}
                 mission={missionByAircraft[ac.id]}
                 onAction={onAction}
+                exchangeUnits={exchangeUnits}
               />
             ))}
           </div>
