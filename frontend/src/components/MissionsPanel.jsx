@@ -12,17 +12,17 @@ const TYPE_COLOR = {
 }
 
 const TYPE_BG = {
-  DCA:    '#1f6feb',
-  RECCE:  '#d29922',
-  'AI/ST': '#f85149',
-  QRA:    '#3fb950',
-  AEW:    '#484f58',
+  DCA:    '#7c3aed',
+  RECCE:  '#c9a227',
+  'AI/ST': '#dc2626',
+  QRA:    '#16a34a',
+  AEW:    '#3d2050',
 }
 
 const OUTCOME_COLORS = {
-  success: '#3fb950',
-  failure: '#f85149',
-  aborted: '#484f58',
+  success: '#16a34a',
+  failure: '#dc2626',
+  aborted: '#3d2050',
 }
 
 
@@ -306,10 +306,10 @@ export default function MissionsPanel({ state, onAssign }) {
           const full       = assigned.length >= m.required_aircraft
           const unassigned = assigned.length === 0
           const barColor   = m.outcome
-            ? (OUTCOME_COLORS[m.outcome] ?? '#484f58')
-            : unassigned ? '#f85149'
-            : full ? (TYPE_BG[m.type] ?? '#484f58')
-            : '#d29922'
+            ? (OUTCOME_COLORS[m.outcome] ?? '#3d2050')
+            : unassigned ? '#dc2626'
+            : full ? (TYPE_BG[m.type] ?? '#3d2050')
+            : '#c9a227'
 
           return (
             <div key={m.id} className="flex items-center mb-1">

@@ -10,8 +10,8 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
-  background-color: #0d1117;
-  color: #e6edf3;
+  background-color: #080008;
+  color: #f0e8f8;
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 
@@ -21,14 +21,14 @@ html, body, #root {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0d1117;
+  background: #080008;
 }
 ::-webkit-scrollbar-thumb {
-  background: #30363d;
+  background: #2d1a3d;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #484f58;
+  background: #3d2050;
 }
 
 /* Chat message markdown */
@@ -36,7 +36,7 @@ html, body, #root {
 .chat-msg p:last-child { margin-bottom: 0; }
 .chat-msg ul, .chat-msg ol { margin: 0.25rem 0 0.25rem 1.25rem; padding: 0; }
 .chat-msg li { margin: 0.1rem 0; }
-.chat-msg strong { color: #e6edf3; }
+.chat-msg strong { color: #f0e8f8; }
 
 /* Mascot mouth animation */
 @keyframes mascotMouthOpen {
