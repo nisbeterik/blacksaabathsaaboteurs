@@ -71,19 +71,9 @@ function isCritical(prev, next) {
     next.current_hour >= m.departure_hour
   )
   const newWriteOff = (next.aircraft_written_off?.length ?? 0) > (prev.aircraft_written_off?.length ?? 0)
-  // Pause when any mission outcome changes from null → resolved
-  const prevMissions = new Map((prev.ato?.missions ?? []).map(m => [m.id, m.outcome]))
-  const missionResolved = (next.ato?.missions ?? []).some(m =>
-    prevMissions.get(m.id) == null && m.outcome != null
-  )
-  // Only pause on mission resolution if there are upcoming missions still needing aircraft
-  const hasUnassignedUpcoming = (next.ato?.missions ?? []).some(m =>
-    m.outcome == null &&
-    m.departure_hour > next.current_hour &&
-    (m.assigned_aircraft?.length ?? 0) < m.required_aircraft
-  )
-  const pauseForMission = missionResolved && hasUnassignedUpcoming
-  return newFault || lifeDrop || dayRollover || missedDeparture || newWriteOff || pauseForMission
+  const prevLogLen = prev.event_log?.length ?? 0
+  const newScramble = (next.event_log ?? []).slice(prevLogLen).some(e => e.includes('SCRAMBLE'))
+  return newFault || lifeDrop || dayRollover || missedDeparture || newWriteOff || newScramble
 }
 
 async function apiFetch(path, options = {}) {
@@ -177,12 +167,21 @@ export default function App() {
           setAutoplay(false)
         } else if (isCritical(prev, checkState)) {
           setAutoplay(false)
-          const prevMissions = new Map((prev?.ato?.missions ?? []).map(m => [m.id, m.outcome]))
-          const resolved = (checkState.ato?.missions ?? []).find(m =>
-            prevMissions.get(m.id) == null && m.outcome != null
-          )
-          const pauseReason = resolved
-            ? `Mission ${resolved.id} ${resolved.outcome} — review & reassign`
+          const newFaultAc = checkState.aircraft.find(a => {
+            const p = prev?.aircraft?.find(p => p.id === a.id)
+            return a.status === 'red' && p && p.status !== 'red'
+          })
+          const lifeDrop = checkState.aircraft.find(a => {
+            const p = prev?.aircraft?.find(p => p.id === a.id)
+            return p && p.remaining_life > 20 && a.remaining_life <= 20
+          })
+          const prevLogLen = prev?.event_log?.length ?? 0
+          const scrambleEvent = (checkState.event_log ?? []).slice(prevLogLen).find(e => e.includes('SCRAMBLE'))
+          const pauseReason = checkState.current_day !== prev?.current_day
+            ? `Day ${checkState.current_day} — new ATO generated`
+            : scrambleEvent ? scrambleEvent
+            : newFaultAc ? `${newFaultAc.id} fault — check fleet`
+            : lifeDrop ? `${lifeDrop.id} life critical (${lifeDrop.remaining_life}h)`
             : 'Critical event'
           showToast(`⏸ Paused — ${pauseReason}`, 'info')
         } else {

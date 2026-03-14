@@ -4,7 +4,7 @@
 
 A single-player roguelike-strategy simulator of a Swedish Air Force dispersed road base
 (vägbas). The player acts as Base Battalion Commander (BC), making decisions about aircraft
-allocation, maintenance prioritisation, and resource management across a 7-day crisis
+allocation, maintenance prioritisation, and resource management across a 3-day crisis
 escalation campaign.
 
 The AI assistant (LLM) is a key tool: it analyses situations, identifies options, and
@@ -32,16 +32,16 @@ Phase escalation fires as a narrative event when the day rolls over:
 
 ## Game End
 
-### Win: Survive all 7 days
-Campaign ends when Day 8 begins. Final score determines the commander grade.
+### Win: Survive all 3 days
+Campaign ends when Day 4 begins. Final score determines the commander grade.
 
 ### Defeat: Fail state triggered mid-campaign
 Any of the following ends the campaign immediately:
 
 | Fail State | Threshold | Attribution |
 |------------|-----------|-------------|
-| Fleet collapse | Fewer than 3 operational aircraft (green + airborne + returning) | Mixed |
-| Score collapse | Campaign score drops below 600 | Decision |
+| Fleet collapse | Fewer than 3 operational aircraft (green + airborne + returning) for 6+ hours | Mixed |
+| Score collapse | Campaign score drops below 700 | Decision |
 | Strategic defeat | 3 or more aircraft written off | Mixed |
 
 ---
@@ -85,29 +85,28 @@ Starting score: **1000**. Tracked throughout the campaign. Determines final grad
 
 | Event | Delta | Category | Detail logged |
 |-------|-------|----------|---------------|
-| Sortie completed (aircraft returns) | +5 | — | Always |
-| Sortie success (outcome roll) | +15 | luck | Narrative outcome in log |
-| Sortie failure (outcome roll) | -25 | luck | Outcome in log |
-| Missed departure (mission left unassigned) | -45 | **decision** | How many green aircraft were available |
-| Wrong config assigned when correct was available | -20 | **decision** | Which correct-config aircraft was idle |
+| Sortie success (outcome roll) | +10 | luck | Narrative outcome in log |
+| Sortie failure (outcome roll) | -20 | luck | Outcome in log |
+| Missed departure (mission left unassigned) | -80 | **decision** | How many green aircraft were available |
+| Wrong config assigned when correct was available | -25 | **decision** | Which correct-config aircraft was idle |
 | Aircraft life ≤ 20h sent on mission | -35 | **decision** | Player chose to fly a grounded-threshold aircraft |
-| Aircraft written off | -80 | mixed | Aircraft ID |
-| Day ends with ≥ 6 operational aircraft | +20 | — | Daily bonus |
-| BIT/post-mission fault (random) | -10 | **luck** | Not the player's fault |
-| Random event fault | -10 | **luck** | Not the player's fault |
-| QRA scramble — manned | +30 | luck | Intercept success |
-| QRA scramble — unmanned | -50 | **decision** | Player chose not to man QRA |
+| Aircraft written off | -100 | mixed | Aircraft ID |
+| Day ends with ≥ 6 operational aircraft | +15 | — | Daily readiness bonus |
+| Post-mission fault (random) | -10 | luck | Not the player's fault |
+| BIT fault (random) | -10 | luck | Not the player's fault |
+| QRA scramble — manned (≥2 assigned) | +25 | luck | Intercept success |
+| QRA scramble — unmanned | -60 | **decision** | Player chose not to man QRA |
 | RTB abort | -25 | **decision** | Player recalled aircraft mid-sortie |
 
 ### Commander Grades
 
 | Score | Grade |
 |-------|-------|
-| 900–1000+ | **Gold — Outstanding** |
-| 800–899   | **Silver — Commended** |
-| 700–799   | **Bronze — Satisfactory** |
-| 600–699   | **Marginal — Survived** |
-| < 600     | **Busted — Campaign Failed** (immediate defeat) |
+| ≥ 950     | **Gold — Outstanding** |
+| 875–949   | **Silver — Commended** |
+| 800–874   | **Bronze — Satisfactory** |
+| 700–799   | **Marginal — Survived** |
+| < 700     | **Campaign Failed** (immediate defeat) |
 
 ---
 
@@ -148,7 +147,7 @@ It requires 2 × DCA/CAP aircraft on standby 24h.
 | QRA status | Outcome | Score |
 |---|---|---|
 | 2+ aircraft assigned | Intercept success — "Airspace defended" | +25 (luck) |
-| Unassigned / undermanned | Scramble missed — "Airspace undefended" | -40 (decision) |
+| Unassigned / undermanned | Scramble missed — "Airspace undefended" | -60 (decision) |
 
 Scramble events pause autoplay so the player sees what happened. Assigning to QRA is a real
 strategic decision — you're sacrificing offensive capability for defensive coverage.
@@ -394,7 +393,7 @@ load during a timed demo.
 |----------|-------|
 | Campaign length | 3 days |
 | Starting score | 1000 |
-| Defeat threshold | < 600 |
+| Defeat threshold | < 700 |
 | Written-off defeat | ≥ 3 aircraft |
 | Fleet collapse threshold | < 3 operational |
 | Random event chance | 4% per autoplay game-hour |
@@ -405,6 +404,6 @@ load during a timed demo.
 | Resupply fuel delivery | +30,000 L |
 | Resupply weapons delivery | +4 Robot-1, +2 Bomb-2, +1 Robot-15 |
 | UE maintenance reduction | -4h per unit applied (min 1h remaining) |
-| QRA scramble score (manned) | +30 |
-| QRA scramble score (unmanned) | -50 (decision) |
+| QRA scramble score (manned) | +25 |
+| QRA scramble score (unmanned) | -60 (decision) |
 | Reconfiguration time | 3h per aircraft |

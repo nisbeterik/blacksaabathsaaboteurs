@@ -151,7 +151,14 @@ function AircraftCard({ ac, mission, onAction, exchangeUnits }) {
       <div className="flex items-center justify-between text-xs">
         <span className="text-text-dim">{ac.location}</span>
         {ac.status === 'on_mission' && mission && (
-          <span className="text-col-blue font-semibold">{mission}</span>
+          <span className="text-col-blue font-semibold">
+            {mission.id} · {mission.type}
+            {mission.departure_hour != null && mission.return_hour != null && (
+              <span className="ml-1 font-normal opacity-70">
+                {String(mission.departure_hour).padStart(2,'0')}–{String(mission.return_hour).padStart(2,'0')}
+              </span>
+            )}
+          </span>
         )}
         {ac.maintenance_eta != null && (
           <span className="text-col-amber font-semibold">{ac.maintenance_eta}h ETA</span>
@@ -259,7 +266,7 @@ export default function FleetPanel({ state, onAction, fleetFilter, onClearFilter
   const missionByAircraft = {}
   ;(state?.ato?.missions ?? []).forEach(m => {
     ;(m.assigned_aircraft ?? []).forEach(id => {
-      missionByAircraft[id] = m.id
+      missionByAircraft[id] = m
     })
   })
 

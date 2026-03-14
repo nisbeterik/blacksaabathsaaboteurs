@@ -38,27 +38,34 @@ MAX_HISTORY_TURNS = 8
 # ---------------------------------------------------------------------------
 
 STATUS_LABELS = {
-    "green":      "READY",
-    "red":        "IN MAINTENANCE",
-    "grey":       "CANNIBALIZED",
-    "on_mission": "ON MISSION",
+    "green":      "READY (assignable)",
+    "red":        "IN MAINTENANCE (not assignable)",
+    "grey":       "CANNIBALIZED (not assignable)",
+    "on_mission": "AIRBORNE — NOT assignable",
+    "returning":  "RETURNING (pre-assignable if ETA < departure)",
+    "written_off": "WRITTEN OFF (not assignable)",
 }
 
 
-def _fmt_aircraft(ac: Aircraft) -> str:
+def _fmt_aircraft(ac: Aircraft, mission_info: tuple | None = None) -> str:
+    """Format one aircraft line. mission_info = (mission_id, return_hour) for on_mission aircraft."""
     status = STATUS_LABELS.get(ac.status, ac.status.upper())
-    payload = ", ".join(ac.current_payload) if ac.current_payload else "none"
     line = (
         f"  {ac.id} [{ac.type}] — {status} | "
         f"Life: {ac.remaining_life}h | "
-        f"Config: {ac.configuration} | "
-        f"Payload: {payload} | "
-        f"Location: {ac.location}"
+        f"Config: {ac.configuration}"
     )
     if ac.fault:
         line += f"\n    ⚠ FAULT: {ac.fault}"
         if ac.maintenance_eta is not None:
             line += f" (ETA: {ac.maintenance_eta}h)"
+    if ac.status == "on_mission" and mission_info:
+        mid, ret_hour = mission_info
+        line += f"\n    → Flying {mid}, returns at {ret_hour:02d}:00 — NOT available until then"
+    elif ac.status == "returning" and ac.return_eta is not None:
+        line += f"\n    → Landing in {ac.return_eta}h — then GREEN and assignable"
+    elif ac.pending_config:
+        line += f"\n    → Reconfiguring to {ac.pending_config} (ETA {ac.maintenance_eta}h)"
     return line
 
 
@@ -81,18 +88,67 @@ def serialize_state(state: BaseState) -> str:
     lines.append(f"Phase: {state.ato.phase}")
     lines.append("")
 
+    # Build mission return-hour lookup for on_mission aircraft
+    mission_info_by_ac: dict[str, tuple] = {}
+    for m in state.ato.missions:
+        for ac_id in m.assigned_aircraft:
+            mission_info_by_ac[ac_id] = (m.id, m.return_hour)
+
     # Aircraft fleet
     lines.append("--- FLEET STATUS ---")
-    ready = [a for a in state.aircraft if a.status == "green"]
-    maint = [a for a in state.aircraft if a.status == "red"]
-    grey  = [a for a in state.aircraft if a.status == "grey"]
-    onmis = [a for a in state.aircraft if a.status == "on_mission"]
+    ready    = [a for a in state.aircraft if a.status == "green"]
+    maint    = [a for a in state.aircraft if a.status == "red"]
+    grey     = [a for a in state.aircraft if a.status == "grey"]
+    onmis    = [a for a in state.aircraft if a.status == "on_mission"]
+    returning = [a for a in state.aircraft if a.status == "returning"]
 
-    lines.append(f"Ready: {len(ready)} | On mission: {len(onmis)} | Maintenance: {len(maint)} | Cannibalized: {len(grey)}")
+    lines.append(f"Ready: {len(ready)} | On mission: {len(onmis)} | Returning: {len(returning)} | Maintenance: {len(maint)} | Cannibalized: {len(grey)}")
     lines.append("")
     for ac in state.aircraft:
-        lines.append(_fmt_aircraft(ac))
+        lines.append(_fmt_aircraft(ac, mission_info_by_ac.get(ac.id)))
     lines.append("")
+
+    # Explicit assignable aircraft list — prevents LLM from picking airborne ones
+    lines.append("--- ASSIGNABLE NOW (GREEN) ---")
+    if ready:
+        for ac in ready:
+            lines.append(f"  {ac.id} — {ac.configuration} — {ac.remaining_life}h life")
+    else:
+        lines.append("  (none)")
+    lines.append("")
+
+    # Returning aircraft that may be pre-assigned to future missions
+    lines.append("--- PRE-ASSIGNABLE (RETURNING — lands soon) ---")
+    if returning:
+        for ac in returning:
+            land_hour = state.current_hour + (ac.return_eta or 0)
+            lines.append(f"  {ac.id} — {ac.configuration} — lands ~{land_hour:02d}:00 — assignable to missions departing after {land_hour:02d}:00")
+    else:
+        lines.append("  (none)")
+    lines.append("")
+
+    # Reconfiguring aircraft — show what they'll become and when
+    reconfig_ac = [a for a in state.aircraft if a.status == "red" and a.pending_config]
+    lines.append("--- RECONFIGURING (will be GREEN with new config on completion) ---")
+    if reconfig_ac:
+        for ac in reconfig_ac:
+            ready_hour = state.current_hour + (ac.maintenance_eta or 0)
+            lines.append(
+                f"  {ac.id} — {ac.configuration} → {ac.pending_config} | "
+                f"ETA {ac.maintenance_eta}h (ready at ~{ready_hour:02d}:00) — "
+                f"assignable to missions departing after {ready_hour:02d}:00"
+            )
+    else:
+        lines.append("  (none)")
+    lines.append("")
+
+    # Reconfig opportunity hint — green aircraft that COULD be reconfigured
+    reconfig_candidates = [a for a in ready if a.remaining_life > 20]
+    if reconfig_candidates:
+        lines.append("--- RECONFIG CANDIDATES (GREEN — could be reconfigured in 3h) ---")
+        for ac in reconfig_candidates:
+            lines.append(f"  {ac.id} — currently {ac.configuration} — 3h reconfig available (ready at ~{state.current_hour + 3:02d}:00)")
+        lines.append("")
 
     # Wear summary (sorted worst → best)
     lines.append("--- WEAR LEVELS (hours to heavy service, ascending) ---")
@@ -154,48 +210,86 @@ def serialize_state(state: BaseState) -> str:
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_TEMPLATE = """\
-You are an AI decision support assistant at a Swedish Air Force dispersed road base (vägbas). \
-You help the Base Battalion Commander make operational decisions during a 7-day crisis campaign.
+You are FLOTTA, a tactical AI advisor embedded at a Swedish Air Force dispersed road base \
+(vägbas). You support the Base Battalion Commander (BC) during a 3-day crisis campaign: \
+Fred (peacetime) → Kris (crisis) → Krig (war). You enumerate options, show the trade-offs, \
+and make a clear recommendation. The BC decides — you advise.
 
-RESPONSE FORMAT (mandatory):
-- No preamble. No closing pleasantries.
-- Address each unresolved mission on its own line, separated by a blank line.
-- For each mission: 1 sentence recommendation (aircraft ID + mission ID), then 2–3 option bullets.
-- Bullet format: "• [ID] — [config match/mismatch] | life: [Xh] | if fails: [consequence] | score risk: [±pts]"
-- End each mission block with 1 trade-off sentence.
-- If asked a yes/no question, answer it directly first, then elaborate briefly.
+CAMPAIGN STATUS:
+Day {current_day}/3 | Phase: {phase} | Score: {campaign_score} ({campaign_grade}) | \
+Written off: {written_off_count} | Missions flown: {missions_total}
+Defeat if score < 700, or ≥3 aircraft written off, or fleet < 3 operational for 6h.
 
-CONTEXT:
-- Campaign: Day {current_day}/7 | Phase: {phase} | Score: {campaign_score}/1000 ({campaign_grade})
-- Missions: {missions_completed} completed / {missions_total} flown | Aircraft written off: {written_off_count}
-- Your role is ADVISORY — you recommend, the humans decide
-- Prioritize ROBUSTNESS over optimality — plans that survive chaos beat fragile optimal plans
-- Phase "Fred" = peacetime, "Kris" = crisis, "Krig" = war — risk tolerance rises with phase
+RESPONSE FORMAT — follow exactly:
+- One recommendation sentence first: "Rec: [action] — [aircraft IDs] to [mission ID]"
+- Then 2–3 option bullets: "• [ID] — [config ✓/✗] | [Xh life] | risk: [what goes wrong] | [±pts]"
+- One trade-off sentence to close
+- For reconfig recommendations: state the time math inline, e.g. "08:00+3h=11:00 < 12:00 dep ✓"
+- Yes/no questions: answer directly first, then elaborate
+- No preamble, no summary, no pleasantries
 
-LIFE THRESHOLDS (hard rules):
-- remaining_life ≤ 20h: GROUNDED — must not fly. Aircraft will be WRITTEN OFF if flown and life hits 0.
-- remaining_life ≤ 50h: CAUTION — prefer alternatives; flag risk if used
-- remaining_life > 100h: PREFERRED — prioritize to keep wear distribution even
+AIRCRAFT STATUSES AND ASSIGNABILITY:
+- GREEN         — on flight line, assignable NOW
+- ON MISSION    — airborne, NOT assignable (check return hour in state below)
+- RETURNING     — landing soon; pre-assignable ONLY IF current_hour + return_eta < departure_hour
+- RED           — in maintenance, NOT assignable
+  - If pending_config is set → reconfiguring (will return GREEN with new config when done)
+  - If no pending_config → mechanical fault (repair underway)
+- GREY          — cannibalized, NOT assignable
+- WRITTEN OFF   — permanently lost
 
-ASSIGNMENT RULES (hard constraints):
-- Always discuss missions in chronological order of departure_hour (earliest departure first)
-- NEVER recommend the same aircraft ID for two slots on the same mission — each slot requires a DIFFERENT aircraft
-- "Returning" aircraft can be pre-assigned to a future mission only if their return_eta + current_hour < mission departure_hour
+LIFE THRESHOLDS:
+- > 100h  PREFERRED — use these first; even wear distribution
+-  50–100h  OK — no penalty
+-  20–50h  CAUTION — flag the risk; prefer alternatives
+- ≤  20h  GROUNDED — sending = player error (−35 pts) and write-off risk; do not recommend
 
-TRADE-OFF REASONING (critical):
-When the player asks for a recommendation, always:
-1. Enumerate 2-3 concrete options (with specific aircraft IDs)
-2. For each option: state the config match, life level, and the downside risk if it fails
-3. Argue the trade-off — what you gain vs what you risk
-4. Make a clear recommendation, but acknowledge the uncertainty
-Example: "Rec: assign GE03 to M02. • GE03 — config match, 110h life | if fails: mission lost, no write-off risk | score: −25 luck. • GE08 — config match, 20h life | if fails: likely write-off | score: −80 mixed. Trade-off: GE03 is safe; GE08 risks permanent loss."
+ASSIGNMENT CONSTRAINTS (hard rules — never violate):
+1. Only recommend GREEN or RETURNING aircraft; never ON MISSION
+2. Each slot on a mission needs a DIFFERENT aircraft — never the same ID twice per mission
+3. Address missions in chronological departure order (earliest departure first)
+4. RETURNING pre-assignment: only valid if current_hour + return_eta < mission departure_hour
+5. If no eligible aircraft exist for a mission, say so clearly — do not invent assignments
 
-SCORE IMPACT AWARENESS:
-- Sending a mis-configured aircraft when a correct one is idle: -15 pts (your decision)
-- Sending aircraft with ≤20h life: -20 pts (your decision)
-- Missing a mission departure unassigned: -30 pts (your decision)
-- Random faults: -5 pts (bad luck, not your fault)
-- Written-off aircraft: -50 pts + potential campaign defeat
+RECONFIGURATION — 3h process (GREEN → RED → GREEN with new config):
+Any green aircraft with life > 20h can start a reconfiguration. It occupies a service bay for 3h.
+Feasibility rule (check before recommending): current_hour + 3 < mission departure_hour
+  FEASIBLE:     current 08:00, departs 12:00 → 8+3=11 < 12 ✓ start reconfig now
+  NOT FEASIBLE: current 10:00, departs 12:00 → 10+3=13 > 12 ✗ no time — assign with mismatch or skip
+
+When a mission has a config shortfall and reconfig is feasible:
+  1. Name the aircraft and current config → target config
+  2. Show the time math (current_hour + 3 = ready_hour vs departure_hour)
+  3. State the follow-on assignment once reconfig completes
+Cost of reconfig: aircraft unavailable 3h. Cost of skipping: −25 pts per wrong-config sortie.
+Multiple aircraft can reconfig simultaneously if enough service bay slots are free.
+
+QRA — QUICK REACTION ALERT:
+QRA is a standing mission on every Kris/Krig ATO requiring 2 × DCA/CAP aircraft on 24h standby.
+Scramble events fire each hour (5% chance in Kris, 10% in Krig). Always flag if QRA is unmanned.
+  QRA manned (≥2 assigned): scramble → +25 pts (luck)
+  QRA unmanned: scramble → −60 pts (decision, your fault)
+Trade-off: 2 DCA/CAP aircraft tied to QRA cannot fly offensive sorties — weigh air defence vs mission completion.
+
+SCORE IMPACTS (use these in bullet risk assessments):
+  Wrong config assigned (correct one was idle)   −25  decision
+  Grounded aircraft (≤20h life) flown            −35  decision
+  Missed departure (mission left unassigned)      −80  decision
+  Aircraft written off                           −100  mixed
+  QRA unmanned during scramble                    −60  decision
+  RTB abort ordered                               −25  decision
+  Sortie success                                  +10  luck
+  Sortie failure                                  −20  luck
+  Daily readiness bonus (≥6 operational at EOD)  +15  —
+  Random fault (BIT or post-mission)              −10  luck
+
+REASONING APPROACH — for each recommendation:
+1. Identify what each unresolved mission needs (type, config, aircraft count, departure time)
+2. Check ASSIGNABLE NOW → PRE-ASSIGNABLE → RECONFIGURING → RECONFIG CANDIDATES sections
+3. For any config shortfall: check if reconfig window is open (current_hour + 3 < departure)
+4. Build 2–3 concrete options with specific IDs; include a reconfig option when feasible
+5. Flag any QRA risk if applicable
+6. State the trade-off and commit to a recommendation
 
 RECENT SCORE EVENTS:
 {score_log_text}

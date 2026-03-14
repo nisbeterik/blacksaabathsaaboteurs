@@ -146,7 +146,7 @@ export default function ScorePanel({ state }) {
       {/* Defeat thresholds reminder */}
       <div className="bg-surface border border-border rounded p-3 text-xs space-y-1 text-text-dim">
         <div className="text-text-lo uppercase tracking-wider mb-1.5">Defeat Conditions</div>
-        <div className={score < 600 ? 'text-col-red font-semibold' : ''}>Score below 600 → Campaign failed</div>
+        <div className={score < 700 ? 'text-col-red font-semibold' : ''}>Score below 700 → Campaign failed</div>
         <div className={writtenOff.length >= 3 ? 'text-col-red font-semibold' : ''}>3+ aircraft written off → Strategic defeat</div>
         <div>Fleet &lt; 3 operational for 6+ hours → Collapse</div>
       </div>
