@@ -5,9 +5,9 @@ March 14th, 2026
 
 ## Team: Black Saabath Saaboteurs
 The team was composed of three developers:
-- @nisbeterik
-- @gababool <br>
-- @johannesborg03 3
+* [@nisbeterik](https://github.com/nisbeterik)
+* [@gababool](https://github.com/gababool)
+* [@johannesborg03](https://github.com/johannesborg03)
 
 ## Description
 
